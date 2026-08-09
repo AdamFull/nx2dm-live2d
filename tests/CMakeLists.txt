@@ -5,14 +5,14 @@
 
 add_executable(nx_live2d_tests test_live2d_core.cpp test_live2d_assets.cpp
         test_live2d_animate.cpp test_live2d_draw.cpp test_live2d_mask.cpp
-        test_live2d_render.cpp test_live2d_clip.cpp)
+        test_live2d_render.cpp test_live2d_clip.cpp test_live2d_pass.cpp)
 
 # nx::rhi and nx::stb for the one case that draws. nx_live2d links neither:
 # proving a model reaches a framebuffer needs a device to reach, and a PNG
 # writer to look at what landed.
 target_link_libraries(nx_live2d_tests
-        PRIVATE nx::test nx::foundation nx::live2d nx::rhi nx::stb
-        nx::compile_options)
+        PRIVATE nx::test nx::foundation nx::live2d nx::live2d_render nx::rhi
+        nx::stb nx::compile_options)
 
 # The fixture is not in this repository: the model this was developed against
 # is a VTube Studio export of a copyrighted character. Point

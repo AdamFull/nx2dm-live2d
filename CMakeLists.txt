@@ -36,10 +36,25 @@ target_link_libraries(nx_live2d
 
 set_target_properties(nx_live2d PROPERTIES FOLDER "modules")
 
+# The pass, which needs a device and the render graph and so cannot live in
+# nx_live2d - keeping that one free of the RHI is what lets every loading,
+# deforming and layout case run headless.
+add_library(nx_live2d_render STATIC live2d_pass.cpp live2d_pass.h)
+add_library(nx::live2d_render ALIAS nx_live2d_render)
+
+target_include_directories(nx_live2d_render PUBLIC "${CMAKE_SOURCE_DIR}/engine"
+        "${CMAKE_SOURCE_DIR}/modules")
+
+target_link_libraries(nx_live2d_render
+        PUBLIC nx::live2d nx::rhi nx::render_graph
+        PRIVATE nx::compile_options)
+
+set_target_properties(nx_live2d_render PROPERTIES FOLDER "modules")
+
 nx_module(live2d
         DISPLAY "the Live2D Cubism integration"
         SOURCES live2d_module.cpp
-        DEPENDS nx::live2d
+        DEPENDS nx::live2d_render
         SHADERS shaders/live2d.slang)
 
 if (NX_BUILD_TESTS)
