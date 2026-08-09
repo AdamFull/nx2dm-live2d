@@ -157,12 +157,16 @@ void MaskLayout::update(const ModelAsset &asset) {
     for (csm::csmInt32 s = 0; s < cc->_clippingIdCount; ++s)
       shapes.push_back(cc->_clippingIdList[s]);
 
+    const csm::csmRectF *const tile = cc->_layoutBounds;
     group_of[i] = nx::cast<i32>(m_groups.size());
     m_shapes.push_back(std::move(shapes));
     m_groups.push_back({
         .atlas = nx::cast<u32>(cc->_bufferIndex),
         .channel = nx::cast<u32>(cc->_layoutChannelIndex),
         .to_mask = to_glm(cc->_matrixForMask),
+        .tile = {tile->X * 2.f - 1.f, tile->Y * 2.f - 1.f,
+                 (tile->X + tile->Width) * 2.f - 1.f,
+                 (tile->Y + tile->Height) * 2.f - 1.f},
         .shapes = {},
     });
   }

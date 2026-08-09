@@ -8,6 +8,7 @@
 #include <Rendering/csmBlendMode.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace nxm::live2d {
 namespace {
@@ -54,6 +55,53 @@ namespace core = Live2D::Cubism::Core;
 
 static_assert(sizeof(core::csmVector2) == sizeof(glm::vec2));
 static_assert(alignof(core::csmVector2) == alignof(glm::vec2));
+
+/// The 2D affine part of one of the layout's 4x4s, as a mat3 whose third
+/// column is the translation. Those matrices only translate and scale in xy;
+/// carrying the rest of a mat4 to the GPU would cost half the push range.
+[[nodiscard]] glm::mat3 affine_of(const glm::mat4 &m) noexcept {
+  glm::mat3 out(1.f);
+  out[0] = glm::vec3(m[0][0], m[0][1], 0.f);
+  out[1] = glm::vec3(m[1][0], m[1][1], 0.f);
+  out[2] = glm::vec3(m[3][0], m[3][1], 1.f);
+  return out;
+}
+
+/// Inverse of a 2D affine held as a mat3. False when it is singular: a model
+/// scaled to nothing has no inverse, and the infinities would reach the shader
+/// as a mask sampled at nowhere.
+[[nodiscard]] bool invert_affine(const glm::mat3 &m, glm::mat3 &out) noexcept {
+  const f32 a = m[0][0];
+  const f32 b = m[1][0];
+  const f32 c = m[0][1];
+  const f32 d = m[1][1];
+  const f32 det = a * d - b * c;
+  if (std::fabs(det) < 1e-12f)
+    return false;
+
+  const f32 inv = 1.f / det;
+  out = glm::mat3(1.f);
+  out[0] = glm::vec3(d * inv, -c * inv, 0.f);
+  out[1] = glm::vec3(-b * inv, a * inv, 0.f);
+  out[2] = glm::vec3(-(out[0][0] * m[2][0] + out[1][0] * m[2][1]),
+                     -(out[0][1] * m[2][0] + out[1][1] * m[2][1]), 1.f);
+  return true;
+}
+
+[[nodiscard]] DrawMask clip_of(const MaskLayout &masks, const i32 drawable,
+                               const glm::mat3 &inverse_world) noexcept {
+  const MaskRef &ref = masks.of(drawable);
+  if (!ref.clipped())
+    return {};
+  return {
+      .group = ref.group,
+      .channel = ref.channel,
+      .inverted = ref.inverted,
+      // The vertices went out in world space, so the shader has to come back
+      // to model space before the layout's matrix means anything.
+      .from_world = affine_of(ref.to_mask) * inverse_world,
+  };
+}
 
 } // namespace
 
@@ -110,8 +158,68 @@ usize masked_drawable_count(const ModelAsset &asset) noexcept {
   return masked;
 }
 
-usize emit_model(const ModelAsset &asset, const ModelView &view,
-                 r2d::MeshChannel &out) {
+usize emit_masks(const ModelAsset &asset, const MaskLayout &masks,
+                 MaskChannel &out) {
+  const csm::CubismModel *const model = asset.model();
+  if (model == nullptr)
+    return 0u;
+  auto *const m = const_cast<csm::CubismModel *>(model);
+  const std::span<const u32> textures = asset.textures();
+
+  nx::vector<r2d::MeshVertex> vertices;
+  nx::vector<u32> indices;
+  usize appended = 0;
+
+  for (usize g = 0; g < masks.groups().size(); ++g) {
+    const MaskGroup &group = masks.groups()[g];
+    for (const i32 shape : group.shapes) {
+      const DrawableMesh mesh = drawable_mesh(asset, shape);
+      if (!mesh.valid())
+        continue;
+      // Opaque, and the mask shader does not read it. Deliberately not the
+      // shape's own opacity: a mask shape is usually an invisible helper - two
+      // of the development model's six sit at zero - so weighting coverage by
+      // it empties their masks and clips everything using them out of
+      // existence. Cubism's own mask shader is channelFlag * texture.a.
+      const u32 color = pack_color(glm::vec4(1.f, 1.f, 1.f, 1.f));
+
+      vertices.clear();
+      vertices.reserve(mesh.positions.size());
+      for (usize v = 0; v < mesh.positions.size(); ++v)
+        vertices.push_back({mesh.positions[v], mesh.uvs[v], color});
+
+      indices.clear();
+      indices.reserve(mesh.indices.size());
+      for (const u16 index : mesh.indices)
+        indices.push_back(nx::cast<u32>(index));
+
+      MaskDraw draw;
+      draw.first_index = nx::cast<u32>(out.indices.size());
+      draw.index_count = nx::cast<u32>(indices.size());
+      draw.vertex_offset = nx::cast<u32>(out.vertices.size());
+      const i32 page = m->GetDrawableTextureIndex(shape);
+      draw.texture = page >= 0 && nx::cast<usize>(page) < textures.size()
+                         ? textures[nx::cast<usize>(page)]
+                         : pack_texture(NX_TEXTURE_NONE, 0);
+      draw.atlas = group.atlas;
+      draw.channel = group.channel;
+      draw.to_mask = affine_of(group.to_mask);
+      draw.tile = group.tile;
+
+      out.vertices.insert(out.vertices.end(), vertices.begin(), vertices.end());
+      out.indices.insert(out.indices.end(), indices.begin(), indices.end());
+      out.draws.push_back(draw);
+      ++appended;
+    }
+  }
+  return appended;
+}
+
+namespace {
+
+usize emit(const ModelAsset &asset, const ModelView &view,
+           r2d::MeshChannel &out, const MaskLayout *const masks,
+           nx::vector<DrawMask> *const out_masks) {
   const csm::CubismModel *const model = asset.model();
   if (model == nullptr)
     return 0u;
@@ -140,6 +248,13 @@ usize emit_model(const ModelAsset &asset, const ModelView &view,
       0u);
   const f32 model_opacity = m->GetModelOpacity();
   const std::span<const u32> textures = asset.textures();
+
+  glm::mat3 inverse_world(1.f);
+  const bool can_clip =
+      masks != nullptr && invert_affine(view.world, inverse_world);
+  if (masks != nullptr && !can_clip)
+    nx::logw("live2d: the model's placement is singular; nothing can be "
+             "clipped through it");
 
   nx::vector<r2d::MeshVertex> vertices;
   nx::vector<u32> indices;
@@ -196,13 +311,18 @@ usize emit_model(const ModelAsset &asset, const ModelView &view,
     draw.camera = view.camera;
     draw.blend = blend;
     ++appended;
+
+    if (out_masks != nullptr)
+      out_masks->push_back(can_clip ? clip_of(*masks, d, inverse_world)
+                                    : DrawMask{});
   }
 
   // Once per model rather than per drawable, and at all rather than never: a
   // face drawn without its clip is a visible defect and the log is where
   // someone looking at one starts.
-  if (const usize masked =
-          mask_counts != nullptr ? masked_drawable_count(asset) : 0u;
+  if (const usize masked = masks == nullptr && mask_counts != nullptr
+                               ? masked_drawable_count(asset)
+                               : 0u;
       masked > 0)
     nx::logw("live2d: {} of {} drawables are clipped and this path does not "
              "mask; they will draw whole",
@@ -216,6 +336,19 @@ usize emit_model(const ModelAsset &asset, const ModelView &view,
              "multiply and screen; they draw normally",
              exotic_blends);
   return appended;
+}
+
+} // namespace
+
+usize emit_model(const ModelAsset &asset, const ModelView &view,
+                 r2d::MeshChannel &out) {
+  return emit(asset, view, out, nullptr, nullptr);
+}
+
+usize emit_model(const ModelAsset &asset, const ModelView &view,
+                 const MaskLayout &masks, r2d::MeshChannel &out,
+                 nx::vector<DrawMask> &out_masks) {
+  return emit(asset, view, out, &masks, &out_masks);
 }
 
 } // namespace nxm::live2d

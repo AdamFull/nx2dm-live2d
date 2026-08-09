@@ -19,6 +19,7 @@ struct MaskGroup {
   u32 atlas = 0;
   u32 channel = 0;
   glm::mat4 to_mask{1.f};
+  glm::vec4 tile{-1.f, -1.f, 1.f, 1.f};
   std::span<const i32> shapes;
 };
 
