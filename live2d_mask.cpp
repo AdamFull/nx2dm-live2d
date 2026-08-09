@@ -100,6 +100,27 @@ public:
 
 MaskLayout::~MaskLayout() { CSM_DELETE(m_clipping); }
 
+MaskLayout::MaskLayout(MaskLayout &&other) noexcept
+    : m_clipping(other.m_clipping), m_groups(std::move(other.m_groups)),
+      m_refs(std::move(other.m_refs)), m_shapes(std::move(other.m_shapes)),
+      m_atlas_size(other.m_atlas_size), m_atlas_count(other.m_atlas_count) {
+  other.m_clipping = nullptr;
+}
+
+MaskLayout &MaskLayout::operator=(MaskLayout &&other) noexcept {
+  if (this != &other) {
+    CSM_DELETE(m_clipping);
+    m_clipping = other.m_clipping;
+    m_groups = std::move(other.m_groups);
+    m_refs = std::move(other.m_refs);
+    m_shapes = std::move(other.m_shapes);
+    m_atlas_size = other.m_atlas_size;
+    m_atlas_count = other.m_atlas_count;
+    other.m_clipping = nullptr;
+  }
+  return *this;
+}
+
 bool MaskLayout::build(const ModelAsset &asset, const u32 atlas_size,
                        const u32 atlas_count) {
   CSM_DELETE(m_clipping);

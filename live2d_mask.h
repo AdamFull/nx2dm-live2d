@@ -41,6 +41,9 @@ public:
   MaskLayout(const MaskLayout &) = delete;
   MaskLayout &operator=(const MaskLayout &) = delete;
 
+  MaskLayout(MaskLayout &&other) noexcept;
+  MaskLayout &operator=(MaskLayout &&other) noexcept;
+
   bool build(const ModelAsset &asset, u32 atlas_size = 512,
              u32 atlas_count = 1);
 

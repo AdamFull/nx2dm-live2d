@@ -4,11 +4,12 @@
  * an Engine exists.
  */
 
-#include "live2d/live2d_pass.h"
 #include "live2d/live2d_platform.h"
+#include "live2d/live2d_system.h"
 
 #include "core/app/engine.h"
 #include "core/app/module.h"
+#include "core/scene/scene_json.h"
 
 #include "core/foundation/diagnostics/log.h"
 
@@ -16,6 +17,8 @@ namespace nxm::live2d {
 namespace {
 
 constexpr nx::string_view DRAW_PASS = "live2d.draw";
+constexpr nx::string_view LOAD_SYSTEM = "live2d.load";
+constexpr nx::string_view UPDATE_SYSTEM = "live2d.update";
 constexpr nx::string_view EMIT_SYSTEM = "live2d.emit";
 constexpr nx::string_view WORLD_SLOT = "world";
 constexpr nx::string_view SHADER = "live2d/live2d";
@@ -26,7 +29,14 @@ public:
     return "live2d";
   }
 
-  bool on_register(nxe::Engine &) override { return install_platform(); }
+  bool on_register(nxe::Engine &engine) override {
+    if (!install_platform())
+      return false;
+    Live2DSystem::register_components(engine.scene().registry());
+    engine.scene().formats().add(
+        nxe::scene::described<Live2DModel>("live2d", "live2d_models"));
+    return true;
+  }
 
   bool on_attach(nxe::Engine &engine) override {
     if (!m_renderer.init(
@@ -38,11 +48,42 @@ public:
       return true;
     }
 
+    m_system.set_resolver(
+        TextureResolver([&engine](const nx::string_view path) {
+          const nxe::rhi::TextureHandle texture = engine.load_texture(path);
+          if (!texture.valid())
+            return pack_texture(NX_TEXTURE_NONE, 0);
+          return pack_texture(
+              engine.device().texture_index(texture),
+              engine.samplers().index(nxe::scene::sampler_bilinear()));
+        }));
+
     engine.schedule().define(
-        EMIT_SYSTEM, nxe::sys::SystemFn([&engine](const nxe::sys::Context &) {
+        LOAD_SYSTEM,
+        nxe::sys::SystemFn([this, &engine](const nxe::sys::Context &) {
+          (void)m_system.load_pending(engine.scene().registry());
+        }));
+    engine.schedule().add(nxe::sys::Stage::Update, LOAD_SYSTEM);
+
+    engine.schedule().define(
+        UPDATE_SYSTEM,
+        nxe::sys::SystemFn([this, &engine](const nxe::sys::Context &c) {
+          (void)m_system.update(engine.scene().registry(), c.dt);
+        }));
+    engine.schedule().add(nxe::sys::Stage::Update, UPDATE_SYSTEM);
+
+    engine.schedule().define(
+        EMIT_SYSTEM,
+        nxe::sys::SystemFn([this, &engine](const nxe::sys::Context &) {
           nxe::r2d::FramePacket *const packet = engine.frame_packet();
-          if (packet != nullptr)
-            packet->channel<Frame>().clear();
+          if (packet == nullptr)
+            return;
+          Frame &frame = packet->channel<Frame>();
+          frame.clear();
+          const SceneView view{.camera = packet->active_camera,
+                               .depth_min = engine.renderer().depth_min(),
+                               .depth_max = engine.renderer().depth_max()};
+          (void)m_system.emit(engine.scene().registry(), frame, view);
         }));
     engine.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
 
@@ -84,6 +125,7 @@ public:
 
 private:
   ModelRenderer m_renderer;
+  Live2DSystem m_system;
 };
 
 } // namespace
