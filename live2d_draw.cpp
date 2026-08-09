@@ -1,0 +1,189 @@
+#include "live2d/live2d_draw.h"
+
+#include "core/foundation/diagnostics/log.h"
+#include "core/rendering/render2d/render_interop.h"
+#include "core/rendering/render2d/scene_renderer.h"
+
+#include <Model/CubismModel.hpp>
+#include <Rendering/csmBlendMode.hpp>
+
+#include <algorithm>
+
+namespace nxm::live2d {
+namespace {
+
+namespace csm = Live2D::Cubism::Framework;
+namespace r2d = nxe::r2d;
+
+namespace core = Live2D::Cubism::Core;
+
+[[nodiscard]] r2d::MeshBlend blend_of(const i32 color_blend,
+                                      bool &unsupported) noexcept {
+  switch (color_blend) {
+  case core::csmColorBlendType_Normal:
+    return r2d::MeshBlend::Normal;
+  case core::csmColorBlendType_AddCompatible:
+  case core::csmColorBlendType_Add:
+    return r2d::MeshBlend::Additive;
+  case core::csmColorBlendType_MultiplyCompatible:
+  case core::csmColorBlendType_Multiply:
+    return r2d::MeshBlend::Multiply;
+  case core::csmColorBlendType_Screen:
+    return r2d::MeshBlend::Screen;
+  default:
+    break;
+  }
+  unsupported = true;
+  return r2d::MeshBlend::Normal;
+}
+
+/// Cubism has no per-vertex colour: a drawable's opacity and its multiply
+/// colour apply to the whole of it, so one packed word serves every vertex.
+[[nodiscard]] u32 tint(const core::csmVector4 &multiply, const f32 opacity,
+                       const glm::vec4 &view) noexcept {
+  return pack_color(glm::vec4(multiply.X * view.x, multiply.Y * view.y,
+                              multiply.Z * view.z, opacity * view.w));
+}
+
+/// A screen colour of black is the identity, which is what an untouched
+/// drawable carries. Anything else needs the fragment shader L4 brings.
+[[nodiscard]] bool uses_screen_colour(const core::csmVector4 &screen) noexcept {
+  constexpr f32 EPSILON = 1.f / 512.f;
+  return screen.X > EPSILON || screen.Y > EPSILON || screen.Z > EPSILON;
+}
+
+} // namespace
+
+usize masked_drawable_count(const ModelAsset &asset) noexcept {
+  const csm::CubismModel *const model = asset.model();
+  if (model == nullptr)
+    return 0u;
+  auto *const m = const_cast<csm::CubismModel *>(model);
+
+  const i32 *const counts = m->GetDrawableMaskCounts();
+  if (counts == nullptr)
+    return 0u;
+
+  usize masked = 0;
+  for (i32 d = 0; d < m->GetDrawableCount(); ++d)
+    if (counts[d] > 0 && m->GetDrawableDynamicFlagIsVisible(d))
+      ++masked;
+  return masked;
+}
+
+usize emit_model(const ModelAsset &asset, const ModelView &view,
+                 r2d::MeshChannel &out) {
+  const csm::CubismModel *const model = asset.model();
+  if (model == nullptr)
+    return 0u;
+  auto *const m = const_cast<csm::CubismModel *>(model);
+
+  const i32 *const order = m->GetRenderOrders();
+  const i32 *const mask_counts = m->GetDrawableMaskCounts();
+  const i32 count = m->GetDrawableCount();
+  if (order == nullptr || count <= 0)
+    return 0u;
+
+  // Cubism's render order is a rank per drawable, so it is turned round into a
+  // list of drawables in the order they are drawn.
+  nx::vector<i32> sorted;
+  sorted.reserve(nx::cast<usize>(count));
+  for (i32 d = 0; d < count; ++d)
+    sorted.push_back(d);
+  std::stable_sort(
+      sorted.begin(), sorted.end(),
+      [order](const i32 a, const i32 b) { return order[a] < order[b]; });
+
+  const u32 layer = nx::cast<u32>(view.layer + 2048) & 0xFFFu;
+  const u32 key = nx_make_sort_key(
+      layer,
+      r2d::quantize_depth(view.world[2][1], view.depth_min, view.depth_max),
+      0u);
+  const f32 model_opacity = m->GetModelOpacity();
+  const std::span<const u32> textures = asset.textures();
+
+  nx::vector<r2d::MeshVertex> vertices;
+  nx::vector<u32> indices;
+  usize appended = 0;
+  usize screen_coloured = 0;
+  usize exotic_blends = 0;
+
+  for (const i32 d : sorted) {
+    if (!m->GetDrawableDynamicFlagIsVisible(d))
+      continue;
+    const i32 vertex_count = m->GetDrawableVertexCount(d);
+    const i32 index_count = m->GetDrawableVertexIndexCount(d);
+    if (vertex_count <= 0 || index_count <= 0)
+      continue;
+
+    const core::csmVector2 *const points = m->GetDrawableVertexPositions(d);
+    const core::csmVector2 *const uvs = m->GetDrawableVertexUvs(d);
+    const csm::csmUint16 *const source = m->GetDrawableVertexIndices(d);
+    if (points == nullptr || uvs == nullptr || source == nullptr)
+      continue;
+
+    if (uses_screen_colour(m->GetDrawableScreenColor(d)))
+      ++screen_coloured;
+
+    const u32 color =
+        tint(m->GetDrawableMultiplyColor(d),
+             m->GetDrawableOpacity(d) * model_opacity, view.color);
+
+    vertices.clear();
+    vertices.reserve(nx::cast<usize>(vertex_count));
+    for (i32 v = 0; v < vertex_count; ++v) {
+      const f32 x = points[v].X;
+      const f32 y = points[v].Y;
+      r2d::MeshVertex vertex;
+      vertex.position = glm::vec2(
+          view.world[0][0] * x + view.world[1][0] * y + view.world[2][0],
+          view.world[0][1] * x + view.world[1][1] * y + view.world[2][1]);
+      // Verbatim, no V flip. Cubism's own Vulkan backend copies them
+      // unchanged, and that is the convention the atlas was authored in.
+      vertex.uv = glm::vec2(uvs[v].X, uvs[v].Y);
+      vertex.color = color;
+      vertices.push_back(vertex);
+    }
+
+    indices.clear();
+    indices.reserve(nx::cast<usize>(index_count));
+    for (i32 i = 0; i < index_count; ++i)
+      indices.push_back(nx::cast<u32>(source[i]));
+
+    bool exotic = false;
+    csm::csmBlendMode mode = m->GetDrawableBlendModeType(d);
+    const r2d::MeshBlend blend = blend_of(mode.GetColorBlendType(), exotic);
+    exotic_blends += exotic ? 1u : 0u;
+
+    const i32 page = m->GetDrawableTextureIndex(d);
+    r2d::MeshDraw &draw = out.append(vertices, indices);
+    draw.texture = page >= 0 && nx::cast<usize>(page) < textures.size()
+                       ? textures[nx::cast<usize>(page)]
+                       : pack_texture(NX_TEXTURE_NONE, 0);
+    draw.sort_key = key;
+    draw.camera = view.camera;
+    draw.blend = blend;
+    ++appended;
+  }
+
+  // Once per model rather than per drawable, and at all rather than never: a
+  // face drawn without its clip is a visible defect and the log is where
+  // someone looking at one starts.
+  if (const usize masked =
+          mask_counts != nullptr ? masked_drawable_count(asset) : 0u;
+      masked > 0)
+    nx::logw("live2d: {} of {} drawables are clipped and this path does not "
+             "mask; they will draw whole",
+             masked, appended);
+  if (screen_coloured > 0)
+    nx::logw("live2d: {} drawables use a screen colour, which this path "
+             "ignores",
+             screen_coloured);
+  if (exotic_blends > 0)
+    nx::logw("live2d: {} drawables use a blend mode beyond normal, additive, "
+             "multiply and screen; they draw normally",
+             exotic_blends);
+  return appended;
+}
+
+} // namespace nxm::live2d
