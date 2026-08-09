@@ -16,8 +16,8 @@ endif ()
 include("${CMAKE_CURRENT_SOURCE_DIR}/NxLive2D.cmake")
 nx_add_live2d()
 
-set(NX_LIVE2D_HEADERS live2d_platform.h)
-set(NX_LIVE2D_SOURCES live2d_platform.cpp live2d_renderer.cpp)
+set(NX_LIVE2D_HEADERS live2d_assets.h live2d_platform.h)
+set(NX_LIVE2D_SOURCES live2d_assets.cpp live2d_platform.cpp live2d_renderer.cpp)
 
 add_library(nx_live2d STATIC ${NX_LIVE2D_SOURCES} ${NX_LIVE2D_HEADERS})
 add_library(nx::live2d ALIAS nx_live2d)
@@ -25,8 +25,11 @@ add_library(nx::live2d ALIAS nx_live2d)
 target_include_directories(nx_live2d PUBLIC "${CMAKE_SOURCE_DIR}/engine"
         "${CMAKE_SOURCE_DIR}/modules")
 
+# render2d for the packed bindless word a texture resolves to, and the mesh
+# channel L3 emits into. No RHI and no engine: a model is geometry until
+# something draws it.
 target_link_libraries(nx_live2d
-        PUBLIC nx::foundation nx::live2d_framework
+        PUBLIC nx::foundation nx::render2d nx::live2d_framework
         PRIVATE nx::compile_options)
 
 set_target_properties(nx_live2d PROPERTIES FOLDER "modules")
