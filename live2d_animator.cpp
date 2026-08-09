@@ -2,6 +2,8 @@
 
 #include "core/foundation/diagnostics/log.h"
 
+#include <Effect/CubismBreath.hpp>
+#include <Effect/CubismEyeBlink.hpp>
 #include <Id/CubismIdManager.hpp>
 #include <Model/CubismUserModel.hpp>
 #include <Motion/CubismExpressionMotionManager.hpp>
@@ -18,7 +20,9 @@ namespace csm = Live2D::Cubism::Framework;
 
 class Exposed final : public csm::CubismUserModel {
 public:
+  using csm::CubismUserModel::_breath;
   using csm::CubismUserModel::_expressionManager;
+  using csm::CubismUserModel::_eyeBlink;
   using csm::CubismUserModel::_model;
   using csm::CubismUserModel::_motionManager;
   using csm::CubismUserModel::_physics;
@@ -80,8 +84,20 @@ void Animator::update(const f32 dt) {
   if (owner->_expressionManager != nullptr)
     owner->_expressionManager->UpdateMotion(model, dt);
 
+  // Cubism's order, and each of these writes parameters the next reads.
+  if (m_blinking && owner->_eyeBlink != nullptr)
+    owner->_eyeBlink->UpdateParameters(model, dt);
+  if (m_breathing && owner->_breath != nullptr)
+    owner->_breath->UpdateParameters(model, dt);
+
   if (owner->_physics != nullptr)
     owner->_physics->Evaluate(model, dt);
+
+  // After physics, as LAppModel does: a mouth is not something inertia should
+  // lag, and a voice that has stopped should close it now rather than settle.
+  for (const nx::string &id : m_asset->lip_sync())
+    model->SetParameterValue(
+        csm::CubismFramework::GetIdManager()->GetId(id.c_str()), m_mouth, 0.8f);
 
   if (owner->_pose != nullptr)
     owner->_pose->UpdateParameters(model, dt);

@@ -6,7 +6,7 @@
 add_executable(nx_live2d_tests test_live2d_core.cpp test_live2d_assets.cpp
         test_live2d_animate.cpp test_live2d_draw.cpp test_live2d_mask.cpp
         test_live2d_render.cpp test_live2d_clip.cpp test_live2d_pass.cpp
-        test_live2d_scene.cpp)
+        test_live2d_scene.cpp test_live2d_effects.cpp)
 
 # nx::rhi and nx::stb for the one case that draws. nx_live2d links neither:
 # proving a model reaches a framebuffer needs a device to reach, and a PNG

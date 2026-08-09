@@ -27,6 +27,9 @@ struct Live2DModel {
   i32 layer = 0;
   u32 mask_resolution = 512;
   bool visible = true;
+  bool blink = true;
+  bool breathe = true;
+  f32 mouth = 0.f;
 };
 
 struct Live2DRuntime {

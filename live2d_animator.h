@@ -28,6 +28,15 @@ public:
 
   void refresh();
 
+  void set_blinking(bool on) noexcept { m_blinking = on; }
+  [[nodiscard]] bool blinking() const noexcept { return m_blinking; }
+
+  void set_breathing(bool on) noexcept { m_breathing = on; }
+  [[nodiscard]] bool breathing() const noexcept { return m_breathing; }
+
+  void set_mouth(f32 amount) noexcept { m_mouth = nx::clamp(amount, 0.f, 1.f); }
+  [[nodiscard]] f32 mouth() const noexcept { return m_mouth; }
+
   [[nodiscard]] bool motion_finished() const noexcept;
   [[nodiscard]] f32 elapsed() const noexcept { return m_elapsed; }
   [[nodiscard]] nx::string_view expression() const noexcept {
@@ -38,6 +47,9 @@ private:
   ModelAsset *m_asset = nullptr;
   nx::string m_expression;
   f32 m_elapsed = 0.f;
+  f32 m_mouth = 0.f;
+  bool m_blinking = false;
+  bool m_breathing = false;
 };
 
 /// Axis-aligned bounds of every visible drawable, in model units.

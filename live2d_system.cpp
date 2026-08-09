@@ -59,6 +59,9 @@ usize Live2DSystem::update(scene::registry_t &registry, const f32 dt) {
                                                        Live2DRuntime &runtime) {
     if (!runtime.ready())
       return;
+    runtime.animator.set_blinking(model.blink);
+    runtime.animator.set_breathing(model.breathe);
+    runtime.animator.set_mouth(model.mouth);
     runtime.animator.update(dt * model.time_scale);
     // After the pose and not before: a mask's tile is fitted to where the
     // art it clips has just moved to.

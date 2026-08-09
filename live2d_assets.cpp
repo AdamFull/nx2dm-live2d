@@ -10,6 +10,9 @@
 
 #include <CubismDefaultParameterId.hpp>
 #include <CubismModelSettingJson.hpp>
+#include <Effect/CubismBreath.hpp>
+#include <Effect/CubismEyeBlink.hpp>
+#include <Id/CubismIdManager.hpp>
 #include <Live2DCubismCore.hpp>
 #include <Model/CubismUserModel.hpp>
 
@@ -21,6 +24,8 @@ namespace core = Live2D::Cubism::Core;
 
 class HostedModel final : public csm::CubismUserModel {
 public:
+  using csm::CubismUserModel::_breath;
+  using csm::CubismUserModel::_eyeBlink;
   using csm::CubismUserModel::_model;
   using csm::CubismUserModel::_physics;
   using csm::CubismUserModel::_pose;
@@ -273,6 +278,32 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
         motion->SetFadeOutTime(fade_out);
       out.m_motions.push_back({nx::string(group), i, motion});
     }
+  }
+
+  // The manifest's own parameter groups. Both are optional and plenty of
+  // models in the wild have neither, which is why nothing here fails without.
+  owner->_eyeBlink = csm::CubismEyeBlink::Create(&settings);
+  out.m_eye_blink = owner->_eyeBlink != nullptr;
+
+  for (i32 i = 0; i < settings.GetLipSyncParameterCount(); ++i)
+    if (const csm::CubismIdHandle id = settings.GetLipSyncParameterId(i);
+        id != nullptr)
+      out.m_lip_sync.push_back(nx::string(id->GetString().GetRawString()));
+
+  // Cubism's own idle sway, on the standard parameters. A model whose rig does
+  // not have them simply ignores the writes.
+  owner->_breath = csm::CubismBreath::Create();
+  if (owner->_breath != nullptr) {
+    csm::csmVector<csm::CubismBreath::BreathParameterData> breath;
+    const auto id = [](const char *const name) {
+      return csm::CubismFramework::GetIdManager()->GetId(name);
+    };
+    breath.PushBack({id("ParamAngleX"), 0.f, 15.f, 6.5345f, 0.5f});
+    breath.PushBack({id("ParamAngleY"), 0.f, 8.f, 3.5345f, 0.5f});
+    breath.PushBack({id("ParamAngleZ"), 0.f, 10.f, 5.5345f, 0.5f});
+    breath.PushBack({id("ParamBodyAngleX"), 0.f, 4.f, 15.5345f, 0.5f});
+    breath.PushBack({id("ParamBreath"), 0.5f, 0.5f, 3.2345f, 1.f});
+    owner->_breath->SetParameters(breath);
   }
 
   owner->IsInitialized(true);

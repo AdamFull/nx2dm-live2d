@@ -95,6 +95,13 @@ public:
 
   [[nodiscard]] bool has_physics() const noexcept { return m_physics; }
   [[nodiscard]] bool has_pose() const noexcept { return m_pose; }
+  [[nodiscard]] bool has_eye_blink() const noexcept { return m_eye_blink; }
+
+  /// Parameter ids the manifest filed under LipSync - what a voice drives.
+  /// Empty for a model whose author never grouped them, which is common.
+  [[nodiscard]] std::span<const nx::string> lip_sync() const noexcept {
+    return {m_lip_sync.data(), m_lip_sync.size()};
+  }
 
   [[nodiscard]] std::span<const nx::string> missing() const noexcept {
     return {m_missing.data(), m_missing.size()};
@@ -111,9 +118,11 @@ private:
   nx::vector<MotionEntry> m_motions;
   nx::vector<ExpressionEntry> m_expressions;
   nx::vector<nx::string> m_missing;
+  nx::vector<nx::string> m_lip_sync;
   CanvasInfo m_canvas;
   bool m_physics = false;
   bool m_pose = false;
+  bool m_eye_blink = false;
 };
 
 [[nodiscard]] bool load_model(nx::string_view model3_path,
