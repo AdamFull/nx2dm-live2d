@@ -40,14 +40,11 @@ public:
   }
 
   bool on_attach(nxe::Engine &engine) override {
-    if (!m_renderer.init(
-            engine.device(), engine.load_shader(SHADER),
-            engine.samplers().index(nxe::scene::sampler_bilinear()))) {
-      // Not a refusal. A build whose shaders were not compiled should still
-      // start; what it loses is Live2D drawing, which the log already said.
-      nx::logw("live2d: attached without a renderer; no model will draw");
-      return true;
-    }
+    const bool can_draw = m_renderer.init(
+        engine.device(), engine.load_shader(SHADER),
+        engine.samplers().index(nxe::scene::sampler_bilinear()));
+    if (!can_draw)
+      nx::logw("live2d: no renderer; models will load and pose but not draw");
 
     m_system.set_resolver(
         TextureResolver([&engine](const nx::string_view path) {
@@ -88,6 +85,12 @@ public:
           (void)m_system.emit(engine.scene().registry(), frame, view);
         }));
     engine.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
+
+    if (!can_draw) {
+      if (engine.scripts().ready())
+        expose_live2d_services(engine.scripts(), engine);
+      return true;
+    }
 
     engine.passes().define(
         DRAW_PASS, nxe::PassFn([this, &engine](nxe::rg::RenderGraph &graph,

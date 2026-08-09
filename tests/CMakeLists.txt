@@ -6,7 +6,12 @@
 add_executable(nx_live2d_tests test_live2d_core.cpp test_live2d_assets.cpp
         test_live2d_animate.cpp test_live2d_draw.cpp test_live2d_mask.cpp
         test_live2d_render.cpp test_live2d_clip.cpp test_live2d_pass.cpp
-        test_live2d_scene.cpp test_live2d_effects.cpp)
+        test_live2d_scene.cpp test_live2d_effects.cpp test_live2d_module.cpp)
+
+# The attach case needs the module and an Engine to attach it to, and the
+# generated registry that hands modules over. Everything else here links only
+# the runtime.
+nx_module_registry(nx_live2d_tests)
 
 # nx::rhi and nx::stb for the one case that draws. nx_live2d links neither:
 # proving a model reaches a framebuffer needs a device to reach, and a PNG
@@ -28,7 +33,10 @@ else ()
 endif ()
 target_compile_definitions(nx_live2d_tests PRIVATE
         NX_LIVE2D_FIXTURE_DIR="${NX_LIVE2D_FIXTURE_DIR}"
-        NX_TEST_SHADER_DIR="${NX_TEST_SHADERS}")
+        NX_TEST_SHADER_DIR="${NX_TEST_SHADERS}"
+        # What the attach case mounts, so Engine::load_shader finds the
+        # module's own shader the way a game would.
+        NX_TEST_RUNTIME_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 if (TARGET nx_rendering_shaders)
     add_dependencies(nx_live2d_tests nx_rendering_shaders)
 endif ()
