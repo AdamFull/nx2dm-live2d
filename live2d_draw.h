@@ -9,9 +9,29 @@
 #include "live2d/live2d_assets.h"
 
 #include <glm/mat3x3.hpp>
+#include <glm/vec2.hpp>
 #include <glm/vec4.hpp>
 
+#include <span>
+
 namespace nxm::live2d {
+
+struct DrawableMesh {
+  std::span<const glm::vec2> positions;
+  std::span<const glm::vec2> uvs;
+  std::span<const u16> indices;
+
+  [[nodiscard]] bool valid() const noexcept {
+    return !positions.empty() && positions.size() == uvs.size() &&
+           !indices.empty();
+  }
+};
+
+[[nodiscard]] DrawableMesh drawable_mesh(const ModelAsset &asset,
+                                         i32 drawable) noexcept;
+
+[[nodiscard]] bool drawable_visible(const ModelAsset &asset,
+                                    i32 drawable) noexcept;
 
 struct ModelView {
   glm::mat3 world{1.f};

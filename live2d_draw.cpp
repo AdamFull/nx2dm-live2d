@@ -52,7 +52,46 @@ namespace core = Live2D::Cubism::Core;
   return screen.X > EPSILON || screen.Y > EPSILON || screen.Z > EPSILON;
 }
 
+static_assert(sizeof(core::csmVector2) == sizeof(glm::vec2));
+static_assert(alignof(core::csmVector2) == alignof(glm::vec2));
+
 } // namespace
+
+DrawableMesh drawable_mesh(const ModelAsset &asset,
+                           const i32 drawable) noexcept {
+  const csm::CubismModel *const model = asset.model();
+  if (model == nullptr || drawable < 0)
+    return {};
+  auto *const m = const_cast<csm::CubismModel *>(model);
+  if (drawable >= m->GetDrawableCount())
+    return {};
+
+  const i32 vertices = m->GetDrawableVertexCount(drawable);
+  const i32 indices = m->GetDrawableVertexIndexCount(drawable);
+  const core::csmVector2 *const points =
+      m->GetDrawableVertexPositions(drawable);
+  const core::csmVector2 *const uvs = m->GetDrawableVertexUvs(drawable);
+  const csm::csmUint16 *const source = m->GetDrawableVertexIndices(drawable);
+  if (vertices <= 0 || indices <= 0 || points == nullptr || uvs == nullptr ||
+      source == nullptr)
+    return {};
+
+  const usize count = nx::cast<usize>(vertices);
+  return {
+      {reinterpret_cast<const glm::vec2 *>(points), count},
+      {reinterpret_cast<const glm::vec2 *>(uvs), count},
+      {source, nx::cast<usize>(indices)},
+  };
+}
+
+bool drawable_visible(const ModelAsset &asset, const i32 drawable) noexcept {
+  const csm::CubismModel *const model = asset.model();
+  if (model == nullptr || drawable < 0)
+    return false;
+  auto *const m = const_cast<csm::CubismModel *>(model);
+  return drawable < m->GetDrawableCount() &&
+         m->GetDrawableDynamicFlagIsVisible(drawable);
+}
 
 usize masked_drawable_count(const ModelAsset &asset) noexcept {
   const csm::CubismModel *const model = asset.model();
@@ -111,15 +150,8 @@ usize emit_model(const ModelAsset &asset, const ModelView &view,
   for (const i32 d : sorted) {
     if (!m->GetDrawableDynamicFlagIsVisible(d))
       continue;
-    const i32 vertex_count = m->GetDrawableVertexCount(d);
-    const i32 index_count = m->GetDrawableVertexIndexCount(d);
-    if (vertex_count <= 0 || index_count <= 0)
-      continue;
-
-    const core::csmVector2 *const points = m->GetDrawableVertexPositions(d);
-    const core::csmVector2 *const uvs = m->GetDrawableVertexUvs(d);
-    const csm::csmUint16 *const source = m->GetDrawableVertexIndices(d);
-    if (points == nullptr || uvs == nullptr || source == nullptr)
+    const DrawableMesh mesh = drawable_mesh(asset, d);
+    if (!mesh.valid())
       continue;
 
     if (uses_screen_colour(m->GetDrawableScreenColor(d)))
@@ -130,25 +162,25 @@ usize emit_model(const ModelAsset &asset, const ModelView &view,
              m->GetDrawableOpacity(d) * model_opacity, view.color);
 
     vertices.clear();
-    vertices.reserve(nx::cast<usize>(vertex_count));
-    for (i32 v = 0; v < vertex_count; ++v) {
-      const f32 x = points[v].X;
-      const f32 y = points[v].Y;
+    vertices.reserve(mesh.positions.size());
+    for (usize v = 0; v < mesh.positions.size(); ++v) {
+      const f32 x = mesh.positions[v].x;
+      const f32 y = mesh.positions[v].y;
       r2d::MeshVertex vertex;
       vertex.position = glm::vec2(
           view.world[0][0] * x + view.world[1][0] * y + view.world[2][0],
           view.world[0][1] * x + view.world[1][1] * y + view.world[2][1]);
       // Verbatim, no V flip. Cubism's own Vulkan backend copies them
       // unchanged, and that is the convention the atlas was authored in.
-      vertex.uv = glm::vec2(uvs[v].X, uvs[v].Y);
+      vertex.uv = mesh.uvs[v];
       vertex.color = color;
       vertices.push_back(vertex);
     }
 
     indices.clear();
-    indices.reserve(nx::cast<usize>(index_count));
-    for (i32 i = 0; i < index_count; ++i)
-      indices.push_back(nx::cast<u32>(source[i]));
+    indices.reserve(mesh.indices.size());
+    for (const u16 index : mesh.indices)
+      indices.push_back(nx::cast<u32>(index));
 
     bool exotic = false;
     csm::csmBlendMode mode = m->GetDrawableBlendModeType(d);

@@ -17,9 +17,9 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/NxLive2D.cmake")
 nx_add_live2d()
 
 set(NX_LIVE2D_HEADERS live2d_animator.h live2d_assets.h live2d_draw.h
-        live2d_platform.h)
+        live2d_mask.h live2d_platform.h)
 set(NX_LIVE2D_SOURCES live2d_animator.cpp live2d_assets.cpp live2d_draw.cpp
-        live2d_platform.cpp live2d_renderer.cpp)
+        live2d_mask.cpp live2d_platform.cpp live2d_renderer.cpp)
 
 add_library(nx_live2d STATIC ${NX_LIVE2D_SOURCES} ${NX_LIVE2D_HEADERS})
 add_library(nx::live2d ALIAS nx_live2d)
