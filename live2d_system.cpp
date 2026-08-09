@@ -52,6 +52,25 @@ usize Live2DSystem::load_pending(scene::registry_t &registry) {
   return loaded;
 }
 
+usize Live2DSystem::drive_lip_sync(scene::registry_t &registry,
+                                   const VoiceLevel &level) {
+  usize speaking = 0;
+  registry.view<Live2DModel>().each(
+      [&](const scene::Entity, Live2DModel &model) {
+        if (model.voice == 0 || !level)
+          return;
+        const f32 amplitude = level(model.voice);
+        if (amplitude < 0.f) {
+          model.voice = 0;
+          model.mouth = 0.f;
+          return;
+        }
+        model.mouth = nx::clamp(amplitude * model.lip_sync_gain, 0.f, 1.f);
+        ++speaking;
+      });
+  return speaking;
+}
+
 usize Live2DSystem::update(scene::registry_t &registry, const f32 dt) {
   usize stepped = 0;
   registry.view<Live2DModel, Live2DRuntime>().each([&](const scene::Entity,

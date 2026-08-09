@@ -29,6 +29,11 @@ public:
 
   void set_resolver(TextureResolver resolve) { m_resolve = std::move(resolve); }
 
+  using VoiceLevel = nx::function<f32(u32 voice)>;
+
+  usize drive_lip_sync(nxe::scene::registry_t &registry,
+                       const VoiceLevel &level);
+
 private:
   TextureResolver m_resolve;
 };

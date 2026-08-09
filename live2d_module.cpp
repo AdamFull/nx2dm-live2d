@@ -5,6 +5,7 @@
  */
 
 #include "live2d/live2d_platform.h"
+#include "live2d/live2d_scripting.h"
 #include "live2d/live2d_system.h"
 
 #include "core/app/engine.h"
@@ -68,6 +69,7 @@ public:
     engine.schedule().define(
         UPDATE_SYSTEM,
         nxe::sys::SystemFn([this, &engine](const nxe::sys::Context &c) {
+          (void)drive_lip_sync(engine, m_system);
           (void)m_system.update(engine.scene().registry(), c.dt);
         }));
     engine.schedule().add(nxe::sys::Stage::Update, UPDATE_SYSTEM);
@@ -109,6 +111,9 @@ public:
     if (!engine.fill_pass_slot(WORLD_SLOT, MINE, name()))
       nx::logw("live2d: nothing to fill; the frame has no '{}' slot",
                WORLD_SLOT);
+
+    if (engine.scripts().ready())
+      expose_live2d_services(engine.scripts(), engine);
 
     nx::logi("live2d: attached");
     return true;

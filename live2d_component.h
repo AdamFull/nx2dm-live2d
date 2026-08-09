@@ -30,6 +30,8 @@ struct Live2DModel {
   bool blink = true;
   bool breathe = true;
   f32 mouth = 0.f;
+  u32 voice = 0;
+  f32 lip_sync_gain = 3.f;
 };
 
 struct Live2DRuntime {

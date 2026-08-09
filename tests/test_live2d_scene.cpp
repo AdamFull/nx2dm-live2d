@@ -170,6 +170,47 @@ TEST_CASE("live2d: a component naming nothing, or a file that is not there") {
   CHECK(world.system.emit(world.registry, frame, {}) == 0u);
 }
 
+TEST_CASE("live2d: a voice opens the mouth, and letting go closes it") {
+  NX_REQUIRE_FIXTURE();
+  World world;
+  REQUIRE(world.ok);
+
+  const scene::Entity e = world.place(MODEL);
+  REQUIRE(world.system.load_pending(world.registry) == 1u);
+  Live2DModel &model = world.registry.get<Live2DModel>(e);
+
+  // No voice, no lip sync - a component driving its mouth by hand should not
+  // have it overwritten.
+  model.mouth = 0.4f;
+  CHECK(world.system.drive_lip_sync(
+            world.registry,
+            Live2DSystem::VoiceLevel([](u32) { return 1.f; })) == 0u);
+  CHECK(model.mouth == 0.4f);
+
+  // A quarter loud, gain three, so three quarters open.
+  model.voice = 17;
+  CHECK(world.system.drive_lip_sync(world.registry,
+                                    Live2DSystem::VoiceLevel([](const u32 v) {
+                                      CHECK(v == 17u);
+                                      return 0.25f;
+                                    })) == 1u);
+  CHECK(std::fabs(model.mouth - 0.75f) < 1e-5f);
+
+  // Loud enough to clip, rather than driving the parameter past its range.
+  CHECK(world.system.drive_lip_sync(
+            world.registry,
+            Live2DSystem::VoiceLevel([](u32) { return 0.9f; })) == 1u);
+  CHECK(model.mouth == 1.f);
+
+  // The line ends. The mouth closes and the handle goes, so a later voice
+  // landing on the same slot does not start driving this model.
+  CHECK(world.system.drive_lip_sync(
+            world.registry,
+            Live2DSystem::VoiceLevel([](u32) { return -1.f; })) == 0u);
+  CHECK(model.mouth == 0.f);
+  CHECK(model.voice == 0u);
+}
+
 TEST_CASE("live2d: only one model in a frame gets the mask atlas") {
   NX_REQUIRE_FIXTURE();
   World world;
