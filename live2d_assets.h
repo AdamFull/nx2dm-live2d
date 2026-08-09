@@ -37,6 +37,20 @@ struct CanvasInfo {
   f32 origin_x = 0.f;
   f32 origin_y = 0.f;
   f32 pixels_per_unit = 1.f;
+
+  [[nodiscard]] f32 width_units() const noexcept {
+    return pixels_per_unit > 0.f ? width / pixels_per_unit : 0.f;
+  }
+  [[nodiscard]] f32 height_units() const noexcept {
+    return pixels_per_unit > 0.f ? height / pixels_per_unit : 0.f;
+  }
+  /// The model's own zero, in the space its vertices are in.
+  [[nodiscard]] f32 origin_x_units() const noexcept {
+    return pixels_per_unit > 0.f ? origin_x / pixels_per_unit : 0.f;
+  }
+  [[nodiscard]] f32 origin_y_units() const noexcept {
+    return pixels_per_unit > 0.f ? origin_y / pixels_per_unit : 0.f;
+  }
 };
 
 class ModelAsset {

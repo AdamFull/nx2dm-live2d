@@ -3,7 +3,8 @@
 # They link nx::live2d and not the module target: what is under test is the
 # runtime, which knows nothing about an Engine.
 
-add_executable(nx_live2d_tests test_live2d_core.cpp test_live2d_assets.cpp)
+add_executable(nx_live2d_tests test_live2d_core.cpp test_live2d_assets.cpp
+        test_live2d_animate.cpp)
 
 target_link_libraries(nx_live2d_tests
         PRIVATE nx::test nx::foundation nx::live2d nx::compile_options)
