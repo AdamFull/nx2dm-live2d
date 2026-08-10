@@ -1,0 +1,19 @@
+{
+  "_": [
+    "As the base template's, plus the script this project drives its model",
+    "with. 'model' is assets/scripts/model.luau; the name has to be loaded",
+    "before anything requires it, and after host, which it requires."
+  ],
+
+  "modules": [
+    "host_modules",
+    "host",
+    "model"
+  ],
+
+  "stages": {
+    "UiEvents": ["core.ui_events"],
+    "Update":   ["game.model", { "slot": "update" }],
+    "Present":  [{ "slot": "present" }]
+  }
+}

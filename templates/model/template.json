@@ -1,0 +1,4 @@
+{
+  "description": "A Cubism model that blinks, breathes and takes direction from Lua",
+  "detail": "Places one Live2DModel in code, then drives it from assets/scripts/model.luau through the live2d_* services. Ships Live2D's own Hiyori sample."
+}

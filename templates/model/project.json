@@ -1,0 +1,6 @@
+{
+  "name": "{{project}}",
+  "package": "{{package}}",
+  "assets": "assets",
+  "modules": ["live2d"]
+}
