@@ -6,7 +6,8 @@
 add_executable(nx_live2d_tests test_live2d_core.cpp test_live2d_assets.cpp
         test_live2d_animate.cpp test_live2d_draw.cpp test_live2d_mask.cpp
         test_live2d_render.cpp test_live2d_clip.cpp test_live2d_pass.cpp
-        test_live2d_scene.cpp test_live2d_effects.cpp test_live2d_module.cpp)
+        test_live2d_scene.cpp test_live2d_effects.cpp test_live2d_module.cpp
+        test_live2d_scripting.cpp)
 
 # The attach case needs the module and an Engine to attach it to, and the
 # generated registry that hands modules over. Everything else here links only
@@ -18,7 +19,7 @@ nx_module_registry(nx_live2d_tests)
 # writer to look at what landed.
 target_link_libraries(nx_live2d_tests
         PRIVATE nx::test nx::foundation nx::live2d nx::live2d_render nx::rhi
-        nx::stb nx::compile_options)
+        nx::stb nx::engine nx::compile_options)
 
 # The fixture is not in this repository: the model this was developed against
 # is a VTube Studio export of a copyrighted character. Point
