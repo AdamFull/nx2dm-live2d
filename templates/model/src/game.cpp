@@ -91,6 +91,7 @@ public:
     nxe::expose_audio_services(engine.scripts(), engine.audio());
     nxe::expose_mixer_services(engine.scripts(), engine.mixer());
     nxe::expose_scene_services(engine.scripts(), engine.scene());
+    nxe::expose_render_services(engine.scripts(), engine.render_vars());
     nxe::expose_ui_services(engine.scripts(), engine.ui());
     engine.scripts().expose_as("quit", [&engine] { engine.request_quit(); });
 
