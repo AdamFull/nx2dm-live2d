@@ -86,11 +86,8 @@ public:
         }));
     engine.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
 
-    if (!can_draw) {
-      if (engine.scripts().ready())
-        expose_live2d_services(engine.scripts(), engine);
+    if (!can_draw)
       return true;
-    }
 
     engine.passes().define(
         DRAW_PASS, nxe::PassFn([this, &engine](nxe::rg::RenderGraph &graph,
@@ -114,9 +111,6 @@ public:
     if (!engine.fill_pass_slot(WORLD_SLOT, MINE, name()))
       nx::logw("live2d: nothing to fill; the frame has no '{}' slot",
                WORLD_SLOT);
-
-    if (engine.scripts().ready())
-      expose_live2d_services(engine.scripts(), engine);
 
     nx::logi("live2d: attached");
     return true;

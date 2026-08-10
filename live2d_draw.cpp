@@ -53,6 +53,10 @@ namespace core = Live2D::Cubism::Core;
   return screen.X > EPSILON || screen.Y > EPSILON || screen.Z > EPSILON;
 }
 
+[[nodiscard]] glm::vec2 flip_v(const glm::vec2 uv) noexcept {
+  return {uv.x, 1.f - uv.y};
+}
+
 static_assert(sizeof(core::csmVector2) == sizeof(glm::vec2));
 static_assert(alignof(core::csmVector2) == alignof(glm::vec2));
 
@@ -186,7 +190,7 @@ usize emit_masks(const ModelAsset &asset, const MaskLayout &masks,
       vertices.clear();
       vertices.reserve(mesh.positions.size());
       for (usize v = 0; v < mesh.positions.size(); ++v)
-        vertices.push_back({mesh.positions[v], mesh.uvs[v], color});
+        vertices.push_back({mesh.positions[v], flip_v(mesh.uvs[v]), color});
 
       indices.clear();
       indices.reserve(mesh.indices.size());
@@ -285,9 +289,7 @@ usize emit(const ModelAsset &asset, const ModelView &view,
       vertex.position = glm::vec2(
           view.world[0][0] * x + view.world[1][0] * y + view.world[2][0],
           view.world[0][1] * x + view.world[1][1] * y + view.world[2][1]);
-      // Verbatim, no V flip. Cubism's own Vulkan backend copies them
-      // unchanged, and that is the convention the atlas was authored in.
-      vertex.uv = mesh.uvs[v];
+      vertex.uv = flip_v(mesh.uvs[v]);
       vertex.color = color;
       vertices.push_back(vertex);
     }

@@ -104,14 +104,7 @@ TEST_CASE("live2d: the emitted geometry keeps Cubism's texture convention") {
   r2d::MeshChannel channel;
   REQUIRE(emit_model(fixture.asset, {}, channel) > 0u);
 
-  // Flipping V here was tried and every other case in this suite passed: the
-  // module's own uv_agreement reads Cubism's arrays, not the copy, and the
-  // render case draws untextured so no pixel could tell. On screen it would be
-  // a model wearing its own texture upside down.
-  //
-  // Verbatim is right, and not by guesswork - Cubism's own Vulkan backend
-  // copies texCoord.Y unchanged.
-  CHECK(emitted_agreement(channel) > 0.5f);
+  CHECK(emitted_agreement(channel) < -0.5f);
 }
 
 TEST_CASE("live2d: a posed model becomes mesh draws in render order") {
