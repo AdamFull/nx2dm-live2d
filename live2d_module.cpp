@@ -39,6 +39,11 @@ public:
     return true;
   }
 
+  void on_expose_scripts(nxe::script::Host &host,
+                         nxe::Engine &engine) override {
+    expose_live2d_services(host, engine);
+  }
+
   bool on_attach(nxe::Engine &engine) override {
     const bool can_draw = m_renderer.init(
         engine.device(), engine.load_shader(SHADER),
