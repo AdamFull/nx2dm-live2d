@@ -55,8 +55,7 @@ set_target_properties(nx_live2d_render PROPERTIES FOLDER "modules")
 nx_module(live2d
         DISPLAY "the Live2D Cubism integration"
         SOURCES live2d_module.cpp live2d_scripting.cpp
-        DEPENDS nx::live2d_render
-        SHADERS shaders/live2d.slang)
+        DEPENDS nx::live2d_render)
 
 if (NX_BUILD_TESTS)
     add_subdirectory(tests)
