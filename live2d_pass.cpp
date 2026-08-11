@@ -1,6 +1,7 @@
 #include "live2d/live2d_pass.h"
 
 #include "core/foundation/diagnostics/log.h"
+#include "core/foundation/strings/format.h"
 
 namespace nxm::live2d {
 namespace {
@@ -139,10 +140,10 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
   if (vertices == 0 || indices == 0)
     return;
 
-  const bool masking = !frame.masks.empty();
+  const bool masking = !frame.masks.empty() && !frame.atlas_sizes.empty();
   u64 mask_vertices = 0;
   u64 mask_indices = 0;
-  rg::TextureId atlas;
+  nx::small_vector<rg::TextureId, 16> atlases;
   if (masking) {
     mask_vertices = m_ring.write(MASK_VERTICES, frame.masks.vertices.data(),
                                  nx::cast<u64>(frame.masks.vertices.size()) *
@@ -153,60 +154,70 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
     if (mask_vertices == 0 || mask_indices == 0)
       return;
 
-    atlas = graph.create({
-        .name = "live2d masks",
-        .format = rhi::Format::RGBA8_UNORM,
-        .width = frame.atlas_size,
-        .height = frame.atlas_size,
-        .usage = rhi::TextureUsage::RenderTarget | rhi::TextureUsage::Sampled,
-    });
+    atlases.reserve(frame.atlas_sizes.size());
+    for (const u32 size : frame.atlas_sizes)
+      atlases.push_back(graph.create({
+          .name = "live2d masks",
+          .format = rhi::Format::RGBA8_UNORM,
+          .width = size,
+          .height = size,
+          .usage =
+              rhi::TextureUsage::RenderTarget | rhi::TextureUsage::Sampled,
+      }));
   }
 
   if (masking) {
-    const u32 size = frame.atlas_size;
-    graph.add_pass(
-        "live2d.masks", rg::SetupFn([atlas](rg::Builder &builder) {
-          builder.color(0, atlas, rhi::clear_color(0.f, 0.f, 0.f, 0.f));
-        }),
-        rg::ExecuteFn([this, &frame, mask_vertices, mask_indices,
-                       size](rhi::CommandContext &cmd, const rg::Resources &) {
-          cmd.set_viewport(
-              {.width = nx::cast<f32>(size), .height = nx::cast<f32>(size)});
-          cmd.set_scissor({{0, 0}, {size, size}});
-          cmd.bind_pipeline(m_mask_pipeline);
-          for (const MaskDraw &draw : frame.masks.draws) {
-            PushBlock push;
-            put_affine(push, draw.to_mask);
-            push.channel = channel_vector(draw.channel);
-            push.tile = draw.tile;
-            push.vertices = mask_vertices;
-            push.indices = mask_indices;
-            push.index_offset = draw.first_index;
-            push.vertex_offset = draw.vertex_offset;
-            push.texture = draw.texture;
-            cmd.push_constants(&push, sizeof(push));
-            cmd.draw(draw.index_count);
-          }
-        }));
+    for (usize atlas_index = 0; atlas_index < atlases.size(); ++atlas_index) {
+      const rg::TextureId atlas = atlases[atlas_index];
+      const u32 size = frame.atlas_sizes[atlas_index];
+      graph.add_pass(
+          nx::format("live2d.masks.{}", atlas_index).view(),
+          rg::SetupFn([atlas](rg::Builder &builder) {
+            builder.color(0, atlas, rhi::clear_color(0.f, 0.f, 0.f, 0.f));
+          }),
+          rg::ExecuteFn(
+              [this, &frame, mask_vertices, mask_indices, size,
+               atlas_index](rhi::CommandContext &cmd, const rg::Resources &) {
+                cmd.set_viewport({.width = nx::cast<f32>(size),
+                                  .height = nx::cast<f32>(size)});
+                cmd.set_scissor({{0, 0}, {size, size}});
+                cmd.bind_pipeline(m_mask_pipeline);
+                for (const MaskDraw &draw : frame.masks.draws) {
+                  if (nx::cast<usize>(draw.atlas) != atlas_index)
+                    continue;
+                  PushBlock push;
+                  put_affine(push, draw.to_mask);
+                  push.channel = channel_vector(draw.channel);
+                  push.tile = draw.tile;
+                  push.vertices = mask_vertices;
+                  push.indices = mask_indices;
+                  push.index_offset = draw.first_index;
+                  push.vertex_offset = draw.vertex_offset;
+                  push.texture = draw.texture;
+                  cmd.push_constants(&push, sizeof(push));
+                  cmd.draw(draw.index_count);
+                }
+              }));
+    }
   }
 
   graph.add_pass(
       "live2d.model",
-      rg::SetupFn([target, atlas, masking](rg::Builder &builder) {
+      rg::SetupFn([target, atlases](rg::Builder &builder) {
         builder.color(0, target);
-        if (masking)
+        for (const rg::TextureId atlas : atlases)
           builder.sample(atlas);
       }),
-      rg::ExecuteFn([this, &device, &frame, atlas, masking, cameras, vertices,
+      rg::ExecuteFn([this, &device, &frame, atlases, cameras, vertices,
                      indices](rhi::CommandContext &cmd,
                               const rg::Resources &resources) {
-        // The atlas is a transient, so it has no handle - and therefore no
-        // bindless index - until the pool hands one over, which is now.
-        const u32 mask_texture =
-            masking
-                ? pack_texture(device.texture_index(resources.texture(atlas)),
-                               m_sampler)
-                : pack_texture(NX_TEXTURE_NONE, 0);
+        // Atlases are transient, so they have no handles - and therefore no
+        // bindless indices - until the pool hands them over, which is now.
+        nx::small_vector<u32, 16> mask_textures;
+        mask_textures.reserve(atlases.size());
+        for (const rg::TextureId atlas : atlases)
+          mask_textures.push_back(pack_texture(
+              device.texture_index(resources.texture(atlas)), m_sampler));
 
         r2d::MeshBlend bound = r2d::MeshBlend::Count;
         for (usize i = 0; i < frame.geometry.draws.size(); ++i) {
@@ -228,9 +239,13 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
           push.vertex_offset = draw.vertex_offset;
           push.texture = draw.texture;
           push.camera = draw.camera;
-          push.mask_texture =
-              clip.clipped() ? mask_texture : pack_texture(NX_TEXTURE_NONE, 0);
-          push.inverted = clip.inverted ? 1u : 0u;
+          const bool clipped =
+              clip.clipped() &&
+              nx::cast<usize>(clip.atlas) < mask_textures.size();
+          push.mask_texture = clipped
+                                  ? mask_textures[clip.atlas]
+                                  : pack_texture(NX_TEXTURE_NONE, 0);
+          push.inverted = clipped && clip.inverted ? 1u : 0u;
           cmd.push_constants(&push, sizeof(push));
           cmd.draw(draw.index_count);
         }

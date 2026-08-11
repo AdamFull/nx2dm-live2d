@@ -93,12 +93,14 @@ static_assert(alignof(core::csmVector2) == alignof(glm::vec2));
 }
 
 [[nodiscard]] DrawMask clip_of(const MaskLayout &masks, const i32 drawable,
-                               const glm::mat3 &inverse_world) noexcept {
+                               const glm::mat3 &inverse_world,
+                               const u32 atlas_base) noexcept {
   const MaskRef &ref = masks.of(drawable);
   if (!ref.clipped())
     return {};
   return {
       .group = ref.group,
+      .atlas = atlas_base + ref.atlas,
       .channel = ref.channel,
       .inverted = ref.inverted,
       // The vertices went out in world space, so the shader has to come back
@@ -163,7 +165,7 @@ usize masked_drawable_count(const ModelAsset &asset) noexcept {
 }
 
 usize emit_masks(const ModelAsset &asset, const MaskLayout &masks,
-                 MaskChannel &out) {
+                 MaskChannel &out, const u32 atlas_base) {
   const csm::CubismModel *const model = asset.model();
   if (model == nullptr)
     return 0u;
@@ -205,7 +207,7 @@ usize emit_masks(const ModelAsset &asset, const MaskLayout &masks,
       draw.texture = page >= 0 && nx::cast<usize>(page) < textures.size()
                          ? textures[nx::cast<usize>(page)]
                          : pack_texture(NX_TEXTURE_NONE, 0);
-      draw.atlas = group.atlas;
+      draw.atlas = atlas_base + group.atlas;
       draw.channel = group.channel;
       draw.to_mask = affine_of(group.to_mask);
       draw.tile = group.tile;
@@ -223,7 +225,7 @@ namespace {
 
 usize emit(const ModelAsset &asset, const ModelView &view,
            r2d::MeshChannel &out, const MaskLayout *const masks,
-           nx::vector<DrawMask> *const out_masks) {
+           nx::vector<DrawMask> *const out_masks, const u32 atlas_base) {
   const csm::CubismModel *const model = asset.model();
   if (model == nullptr)
     return 0u;
@@ -315,7 +317,8 @@ usize emit(const ModelAsset &asset, const ModelView &view,
     ++appended;
 
     if (out_masks != nullptr)
-      out_masks->push_back(can_clip ? clip_of(*masks, d, inverse_world)
+      out_masks->push_back(can_clip ? clip_of(*masks, d, inverse_world,
+                                              atlas_base)
                                     : DrawMask{});
   }
 
@@ -344,13 +347,13 @@ usize emit(const ModelAsset &asset, const ModelView &view,
 
 usize emit_model(const ModelAsset &asset, const ModelView &view,
                  r2d::MeshChannel &out) {
-  return emit(asset, view, out, nullptr, nullptr);
+  return emit(asset, view, out, nullptr, nullptr, 0);
 }
 
 usize emit_model(const ModelAsset &asset, const ModelView &view,
                  const MaskLayout &masks, r2d::MeshChannel &out,
-                 nx::vector<DrawMask> &out_masks) {
-  return emit(asset, view, out, &masks, &out_masks);
+                 nx::vector<DrawMask> &out_masks, const u32 atlas_base) {
+  return emit(asset, view, out, &masks, &out_masks, atlas_base);
 }
 
 } // namespace nxm::live2d

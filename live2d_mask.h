@@ -26,6 +26,7 @@ struct MaskGroup {
 /// What one clipped drawable needs in order to sample its mask.
 struct MaskRef {
   i32 group = -1;
+  u32 atlas = 0;
   u32 channel = 0;
   bool inverted = false;
   glm::mat4 to_mask{1.f};
@@ -46,6 +47,8 @@ public:
 
   bool build(const ModelAsset &asset, u32 atlas_size = 512,
              u32 atlas_count = 1);
+
+  void clear() noexcept;
 
   void update(const ModelAsset &asset);
 

@@ -58,6 +58,69 @@ struct World {
 
 } // namespace
 
+TEST_CASE("live2d: mask limits retain a safe minimum under memory pressure") {
+  scene::registry_t registry;
+  Live2DSystem::register_components(registry);
+  Live2DSystem system;
+  CHECK(system.on_low_memory(registry) == 0u);
+  CHECK(system.mask_resolution_limit() == 1024u);
+  CHECK(system.mask_budget() == (u64{8} << 20));
+  CHECK(system.mask_atlas_limit() == 8u);
+  system.set_mask_limits(16384, 1, ~u32{0});
+  CHECK(system.mask_atlas_limit() == 16u);
+  system.set_mask_limits(1, 1, 0);
+  CHECK(system.mask_resolution_limit() == 64u);
+  CHECK(system.mask_budget() == u64{64} * 64 * 4);
+  CHECK(system.mask_atlas_limit() == 1u);
+  CHECK(system.on_low_memory(registry) == 0u);
+  CHECK(system.mask_resolution_limit() == 64u);
+  CHECK(system.mask_budget() == u64{64} * 64 * 4);
+}
+
+TEST_CASE("live2d: clearing a model request unloads its runtime") {
+  scene::registry_t registry;
+  Live2DSystem::register_components(registry);
+  const scene::Entity e = registry.create();
+  Live2DModel &model = registry.emplace<Live2DModel>(e);
+  model.model = "/old/model3.json";
+  registry.emplace<Live2DRuntime>(e).requested = model.model;
+
+  model.model.clear();
+  Live2DSystem system;
+  CHECK(system.load_pending(registry) == 0u);
+  CHECK(registry.try_get<Live2DRuntime>(e) == nullptr);
+}
+
+TEST_CASE("live2d: a failed model retries with exponential backoff") {
+  nx::vfs::initialize();
+  REQUIRE(nx::vfs::mount("/", nx::vfs::make_memory_device()));
+
+  scene::registry_t registry;
+  Live2DSystem::register_components(registry);
+  const scene::Entity e = registry.create();
+  Live2DModel &model = registry.emplace<Live2DModel>(e);
+  model.model = "/late/model3.json";
+  Live2DSystem system;
+
+  CHECK(system.load_pending(registry) == 0u);
+  Live2DRuntime &runtime = registry.get<Live2DRuntime>(e);
+  CHECK(runtime.requested == model.model);
+  CHECK(runtime.loaded.empty());
+  CHECK(runtime.load_failures == 1u);
+  CHECK(runtime.retry_in == 1.f);
+
+  // No retry storm while no simulation time passes.
+  CHECK(system.load_pending(registry) == 0u);
+  CHECK(runtime.load_failures == 1u);
+  // The deadline retries, fails again, and doubles the delay.
+  CHECK(system.load_pending(registry, 1.f) == 0u);
+  CHECK(runtime.load_failures == 2u);
+  CHECK(runtime.retry_in == 2.f);
+
+  registry.clear();
+  nx::vfs::shutdown();
+}
+
 TEST_CASE("live2d: a model named by a component is loaded, posed and drawn") {
   NX_REQUIRE_FIXTURE();
   World world;
@@ -88,7 +151,8 @@ TEST_CASE("live2d: a model named by a component is loaded, posed and drawn") {
   CHECK(!frame.empty());
   CHECK(frame.clips.size() == frame.geometry.draws.size());
   CHECK(!frame.masks.empty());
-  CHECK(frame.atlas_size == runtime->masks.atlas_size());
+  REQUIRE(frame.atlas_sizes.size() == runtime->masks.atlas_count());
+  CHECK(frame.atlas_sizes[0] == runtime->masks.atlas_size());
 
   // The resolver's answer reached the draws rather than being dropped.
   for (const nxe::r2d::MeshDraw &draw : frame.geometry.draws)
@@ -161,10 +225,18 @@ TEST_CASE("live2d: a component naming nothing, or a file that is not there") {
       world.registry.try_get<Live2DRuntime>(missing);
   REQUIRE(failed != nullptr);
   CHECK_FALSE(failed->ready());
-  // Remembered as attempted, so the next frame does not try again. A missing
-  // file will not appear, and retrying turns one typo into a log per frame.
-  CHECK(failed->loaded == "/nothing/here.model3.json");
+  // Failed is not loaded. It is remembered separately and retried with a
+  // backoff, so a late mount/hot-deployed file can recover without logging on
+  // every frame.
+  CHECK(failed->loaded.empty());
+  CHECK(failed->requested == "/nothing/here.model3.json");
+  CHECK(failed->load_failures == 1u);
+  const f32 retry = failed->retry_in;
+  CHECK(retry > 0.f);
   CHECK(world.system.load_pending(world.registry) == 0u);
+  CHECK(failed->load_failures == 1u);
+  CHECK(world.system.load_pending(world.registry, retry) == 0u);
+  CHECK(failed->load_failures == 2u);
 
   Frame frame;
   CHECK(world.system.emit(world.registry, frame, {}) == 0u);
@@ -211,26 +283,85 @@ TEST_CASE("live2d: a voice opens the mouth, and letting go closes it") {
   CHECK(model.voice == 0u);
 }
 
-TEST_CASE("live2d: only one model in a frame gets the mask atlas") {
+TEST_CASE("live2d: every masked model in a frame gets its own atlas") {
   NX_REQUIRE_FIXTURE();
   World world;
   REQUIRE(world.ok);
 
-  world.place(MODEL);
-  world.place(MODEL);
+  const scene::Entity first = world.place(MODEL);
+  const scene::Entity second = world.place(MODEL);
   REQUIRE(world.system.load_pending(world.registry) == 2u);
 
   Frame frame;
   CHECK(world.system.emit(world.registry, frame, {}) == 2u);
 
-  // Both drew, and the clips stayed one per draw - the second model's are all
-  // unclipped because every layout packs as though it owned the whole atlas.
-  // Wrong in the way L3 was, and loudly, rather than two models overwriting
-  // each other's tiles.
   CHECK(frame.clips.size() == frame.geometry.draws.size());
+  REQUIRE(frame.atlas_sizes.size() == 2u);
+  const Live2DRuntime &a = world.registry.get<Live2DRuntime>(first);
+  const Live2DRuntime &b = world.registry.get<Live2DRuntime>(second);
+  const usize expected =
+      masked_drawable_count(a.asset) + masked_drawable_count(b.asset);
+  usize clipped = 0;
+  bool sampled_first = false;
+  bool sampled_second = false;
+  for (const DrawMask &clip : frame.clips)
+    if (clip.clipped()) {
+      ++clipped;
+      sampled_first = sampled_first || clip.atlas == 0u;
+      sampled_second = sampled_second || clip.atlas == 1u;
+    }
+  CHECK(clipped == expected);
+  CHECK(sampled_first);
+  CHECK(sampled_second);
+
+  bool drew_first = false;
+  bool drew_second = false;
+  for (const MaskDraw &draw : frame.masks.draws) {
+    drew_first = drew_first || draw.atlas == 0u;
+    drew_second = drew_second || draw.atlas == 1u;
+  }
+  CHECK(drew_first);
+  CHECK(drew_second);
+}
+
+TEST_CASE("live2d: the mask budget degrades excess models without collisions") {
+  NX_REQUIRE_FIXTURE();
+  World world;
+  REQUIRE(world.ok);
+  constexpr u64 one_atlas = u64{512} * 512 * 4;
+  world.system.set_mask_limits(512, one_atlas, 1);
+
+  const scene::Entity first = world.place(MODEL);
+  world.place(MODEL);
+  REQUIRE(world.system.load_pending(world.registry) == 2u);
+
+  Frame frame;
+  CHECK(world.system.emit(world.registry, frame, {}) == 2u);
+  REQUIRE(frame.atlas_sizes.size() == 1u);
+  const usize expected = masked_drawable_count(
+      world.registry.get<Live2DRuntime>(first).asset);
   usize clipped = 0;
   for (const DrawMask &clip : frame.clips)
     clipped += clip.clipped() ? 1u : 0u;
-  CHECK(clipped > 0u);
-  CHECK(clipped < frame.geometry.draws.size());
+  CHECK(clipped == expected);
+  for (const MaskDraw &draw : frame.masks.draws)
+    CHECK(draw.atlas == 0u);
+}
+
+TEST_CASE("live2d: low memory shrinks live masks and future budget") {
+  NX_REQUIRE_FIXTURE();
+  World world;
+  REQUIRE(world.ok);
+
+  const scene::Entity e = world.place(MODEL);
+  REQUIRE(world.system.load_pending(world.registry) == 1u);
+  Live2DRuntime &runtime = world.registry.get<Live2DRuntime>(e);
+  REQUIRE(runtime.masks.atlas_size() == 512u);
+  const u64 before = world.system.mask_budget();
+
+  CHECK(world.system.on_low_memory(world.registry) == 1u);
+  CHECK(runtime.masks.atlas_size() == 256u);
+  CHECK(world.system.mask_resolution_limit() == 256u);
+  CHECK(world.system.mask_budget() < before);
+  CHECK(runtime.masks.active());
 }

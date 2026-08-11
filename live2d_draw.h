@@ -49,6 +49,7 @@ usize emit_model(const ModelAsset &asset, const ModelView &view,
 /// How one emitted draw is clipped. One per draw appended, in the same order.
 struct DrawMask {
   i32 group = -1;
+  u32 atlas = 0;
   u32 channel = 0;
   bool inverted = false;
   glm::mat3 from_world{1.f};
@@ -60,7 +61,7 @@ struct DrawMask {
 /// draw, so a pass that can clip knows which of them to and how.
 usize emit_model(const ModelAsset &asset, const ModelView &view,
                  const MaskLayout &masks, nxe::r2d::MeshChannel &out,
-                 nx::vector<DrawMask> &out_masks);
+                 nx::vector<DrawMask> &out_masks, u32 atlas_base = 0);
 
 /// One mask group's geometry, in model space, to be drawn into the atlas.
 struct MaskDraw {
@@ -90,7 +91,7 @@ struct MaskChannel {
 /// Appends the shapes making up each of @p masks' groups. Model space, because
 /// a mask is drawn into its own tile and never through a camera.
 usize emit_masks(const ModelAsset &asset, const MaskLayout &masks,
-                 MaskChannel &out);
+                 MaskChannel &out, u32 atlas_base = 0);
 
 [[nodiscard]] usize masked_drawable_count(const ModelAsset &asset) noexcept;
 

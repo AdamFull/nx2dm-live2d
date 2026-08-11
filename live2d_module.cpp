@@ -51,6 +51,17 @@ public:
     if (!can_draw)
       nx::logw("live2d: no renderer; models will load and pose but not draw");
 
+    const nxe::rhi::DeviceCaps &caps = engine.device().caps();
+    const u32 max_mask_resolution =
+        nx::min(caps.max_texture_2d != 0 ? caps.max_texture_2d : 2048u,
+                2048u);
+    const u64 memory_budget =
+        caps.device_local_memory != 0
+            ? nx::clamp(caps.device_local_memory / 256u, u64{4} << 20,
+                        u64{32} << 20)
+            : u64{16} << 20;
+    m_system.set_mask_limits(max_mask_resolution, memory_budget);
+
     m_system.set_resolver(
         TextureResolver([&engine](const nx::string_view path) {
           const nxe::rhi::TextureHandle texture = engine.load_texture(path);
@@ -63,8 +74,8 @@ public:
 
     engine.schedule().define(
         LOAD_SYSTEM,
-        nxe::sys::SystemFn([this, &engine](const nxe::sys::Context &) {
-          (void)m_system.load_pending(engine.scene().registry());
+        nxe::sys::SystemFn([this, &engine](const nxe::sys::Context &c) {
+          (void)m_system.load_pending(engine.scene().registry(), c.dt);
         }));
     engine.schedule().add(nxe::sys::Stage::Update, LOAD_SYSTEM);
 
@@ -126,8 +137,13 @@ public:
     uninstall_platform();
   }
 
-  void on_low_memory(nxe::Engine &) override {
-    nx::logi("live2d: nothing held that can be dropped");
+  void on_low_memory(nxe::Engine &engine) override {
+    const usize reduced =
+        m_system.on_low_memory(engine.scene().registry());
+    nx::logi("live2d: low memory reduced {} mask layout(s); future masks are "
+             "capped at {}px and {} KiB per frame",
+             reduced, m_system.mask_resolution_limit(),
+             m_system.mask_budget() >> 10);
   }
 
 private:

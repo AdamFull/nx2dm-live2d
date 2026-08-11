@@ -38,7 +38,12 @@ struct Live2DRuntime {
   ModelAsset asset;
   Animator animator;
   MaskLayout masks;
+  /// The last path attempted. Kept separate from loaded so a failed request
+  /// can retry without pretending it succeeded.
+  nx::string requested;
   nx::string loaded;
+  f32 retry_in = 0.f;
+  u32 load_failures = 0;
 
   Live2DRuntime() = default;
   ~Live2DRuntime() = default;
@@ -48,7 +53,8 @@ struct Live2DRuntime {
 
   Live2DRuntime(Live2DRuntime &&other) noexcept
       : asset(std::move(other.asset)), masks(std::move(other.masks)),
-        loaded(std::move(other.loaded)) {
+        requested(std::move(other.requested)), loaded(std::move(other.loaded)),
+        retry_in(other.retry_in), load_failures(other.load_failures) {
     animator = std::move(other.animator);
     animator.bind(&asset);
     other.animator.bind(nullptr);
@@ -58,7 +64,10 @@ struct Live2DRuntime {
     if (this != &other) {
       asset = std::move(other.asset);
       masks = std::move(other.masks);
+      requested = std::move(other.requested);
       loaded = std::move(other.loaded);
+      retry_in = other.retry_in;
+      load_failures = other.load_failures;
       animator = std::move(other.animator);
       animator.bind(&asset);
       other.animator.bind(nullptr);

@@ -17,7 +17,7 @@ struct Frame {
   nxe::r2d::MeshChannel geometry;
   nx::vector<DrawMask> clips;
   MaskChannel masks;
-  u32 atlas_size = 512;
+  nx::small_vector<u32, 16> atlas_sizes;
 
   [[nodiscard]] bool empty() const noexcept { return geometry.draws.empty(); }
 
@@ -25,6 +25,7 @@ struct Frame {
     geometry.clear();
     clips.clear();
     masks.clear();
+    atlas_sizes.clear();
   }
 };
 

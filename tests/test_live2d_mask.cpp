@@ -120,7 +120,9 @@ TEST_CASE("live2d: masks pack into the atlas's channels without colliding") {
     if (!ref.clipped())
       continue;
     REQUIRE(nx::cast<usize>(ref.group) < groups.size());
-    CHECK(ref.channel == groups[nx::cast<usize>(ref.group)].channel);
+    const MaskGroup &group = groups[nx::cast<usize>(ref.group)];
+    CHECK(ref.atlas == group.atlas);
+    CHECK(ref.channel == group.channel);
   }
 }
 

@@ -100,6 +100,14 @@ public:
 
 MaskLayout::~MaskLayout() { CSM_DELETE(m_clipping); }
 
+void MaskLayout::clear() noexcept {
+  CSM_DELETE(m_clipping);
+  m_clipping = nullptr;
+  m_groups.clear();
+  m_refs.clear();
+  m_shapes.clear();
+}
+
 MaskLayout::MaskLayout(MaskLayout &&other) noexcept
     : m_clipping(other.m_clipping), m_groups(std::move(other.m_groups)),
       m_refs(std::move(other.m_refs)), m_shapes(std::move(other.m_shapes)),
@@ -123,11 +131,7 @@ MaskLayout &MaskLayout::operator=(MaskLayout &&other) noexcept {
 
 bool MaskLayout::build(const ModelAsset &asset, const u32 atlas_size,
                        const u32 atlas_count) {
-  CSM_DELETE(m_clipping);
-  m_clipping = nullptr;
-  m_groups.clear();
-  m_refs.clear();
-  m_shapes.clear();
+  clear();
 
   csm::CubismModel *const model = asset.model();
   if (model == nullptr || atlas_size == 0 || atlas_count == 0)
@@ -215,6 +219,7 @@ void MaskLayout::update(const ModelAsset &asset) {
 
     m_refs[d] = {
         .group = group,
+        .atlas = nx::cast<u32>(cc->_bufferIndex),
         .channel = nx::cast<u32>(cc->_layoutChannelIndex),
         .inverted =
             model->GetDrawableInvertedMask(nx::cast<csm::csmInt32>(d)) != 0,

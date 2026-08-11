@@ -118,7 +118,7 @@ TEST_CASE("live2d: the renderer draws a masked model through the graph") {
   view.world[2][1] = 0.52f;
 
   Frame frame;
-  frame.atlas_size = ATLAS;
+  frame.atlas_sizes.push_back(ATLAS);
   REQUIRE(emit_model(asset, view, masks, frame.geometry, frame.clips) > 0u);
   REQUIRE(emit_masks(asset, masks, frame.masks) > 0u);
 
@@ -225,6 +225,53 @@ TEST_CASE("live2d: a renderer with nothing to draw records no passes") {
   const Frame nothing;
   renderer.draw(device, graph, {}, rhi::Format::RGBA8_UNORM, 0, nothing);
   CHECK(graph.pass_count() == 0u);
+
+  graph.shutdown();
+  renderer.shutdown(device);
+}
+
+TEST_CASE("live2d: the renderer records every mask atlas") {
+  TestDevice fixture;
+  if (!fixture.ready)
+    SKIP("no usable RHI device");
+  rhi::Device &device = fixture.device;
+
+  const rhi::ShaderHandle shader = load_live2d_shader(device);
+  if (!shader.valid())
+    SKIP("the module's shaders are not built in this configuration");
+
+  ModelRenderer renderer;
+  REQUIRE(renderer.init(device, shader, 0));
+
+  Frame frame;
+  frame.geometry.vertices = {
+      {{-0.5f, -0.5f}, {0.f, 0.f}, 0xffff'ffffu},
+      {{0.5f, -0.5f}, {1.f, 0.f}, 0xffff'ffffu},
+      {{0.f, 0.5f}, {0.5f, 1.f}, 0xffff'ffffu},
+  };
+  frame.geometry.indices = {0, 1, 2};
+  frame.geometry.draws.push_back({.index_count = 3});
+  frame.clips.push_back({.group = 0, .atlas = 1});
+  frame.masks.vertices = frame.geometry.vertices;
+  frame.masks.indices = frame.geometry.indices;
+  frame.masks.draws.push_back({.index_count = 3, .atlas = 0});
+  frame.masks.draws.push_back({.index_count = 3, .atlas = 1});
+  frame.atlas_sizes = {64, 128};
+
+  rg::RenderGraph graph;
+  REQUIRE(graph.init(&device));
+  graph.begin_frame();
+  const rg::TextureId target = graph.create({
+      .name = "live2d multi-atlas target",
+      .format = rhi::Format::RGBA8_UNORM,
+      .width = TARGET,
+      .height = TARGET,
+      .usage = rhi::TextureUsage::RenderTarget,
+  });
+  renderer.draw(device, graph, target, rhi::Format::RGBA8_UNORM, 0, frame);
+
+  // Two independent clears/draws, then the model pass that samples both.
+  CHECK(graph.pass_count() == 3u);
 
   graph.shutdown();
   renderer.shutdown(device);
