@@ -28,7 +28,7 @@ target_link_libraries(nx_live2d_tests
 set(NX_LIVE2D_FIXTURE_DIR "" CACHE PATH
         "Directory holding a Cubism model export for the Live2D tests")
 if (ANDROID)
-    set(NX_TEST_SHADERS "${CMAKE_SOURCE_DIR}/android/app/src/main/assets/shaders")
+    set(NX_TEST_SHADERS "${NX_ANDROID_SHADER_OUT}")
 else ()
     set(NX_TEST_SHADERS "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders")
 endif ()
