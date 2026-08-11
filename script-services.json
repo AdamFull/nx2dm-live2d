@@ -1,0 +1,36 @@
+{
+  "services": [
+    {
+      "name": "live2d_play",
+      "signature": "(number,string,number,boolean)->(boolean)"
+    },
+    {
+      "name": "live2d_expression",
+      "signature": "(number,string)->(boolean)"
+    },
+    {
+      "name": "live2d_finished",
+      "signature": "(number)->(boolean)"
+    },
+    {
+      "name": "live2d_set_param",
+      "signature": "(number,string,number)->(boolean)"
+    },
+    {
+      "name": "live2d_param",
+      "signature": "(number,string)->(number)"
+    },
+    {
+      "name": "live2d_visible",
+      "signature": "(number,boolean)->(boolean)"
+    },
+    {
+      "name": "live2d_mouth",
+      "signature": "(number,number)->(boolean)"
+    },
+    {
+      "name": "live2d_speak",
+      "signature": "(number,string)->(boolean)"
+    }
+  ]
+}

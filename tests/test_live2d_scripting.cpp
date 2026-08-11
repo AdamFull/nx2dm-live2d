@@ -8,7 +8,7 @@
  * the wrong thing. This is where that gets caught.
  *
  * No backend and no started Engine: Host::expose records, and only bind() needs
- * a VM. It is the same trick tools/make_host_declarations plays.
+ * a VM. The generated manifest is checked against the same surface at startup.
  */
 
 #include "framework/nxtest.h"
