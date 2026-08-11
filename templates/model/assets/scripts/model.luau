@@ -4,9 +4,9 @@
 -- Everything here goes through the live2d_* services the module exposes. The
 -- engine knows nothing about them: they arrive because project.json asks for
 -- the live2d module, and the declarations host.luau checks against are written
--- into host_modules.luau by the build.
+-- into the generated host_api.luau by the build.
 
-local host = require("./host")
+local host = require("./host_api")
 
 -- The node src/game.cpp made. Looked up once and kept: find walks the scene.
 local model: number? = nil

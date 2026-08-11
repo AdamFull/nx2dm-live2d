@@ -2,12 +2,11 @@
   "_": [
     "As the base template's, plus the script this project drives its model",
     "with. 'model' is assets/scripts/model.luau; the name has to be loaded",
-    "before anything requires it, and after host, which it requires."
+    "before anything requires it, and after host_api, which it requires."
   ],
 
   "modules": [
-    "host_modules",
-    "host",
+    "host_api",
     "model"
   ],
 
