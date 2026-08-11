@@ -49,4 +49,23 @@ endif ()
 
 set_target_properties(nx_live2d_tests PROPERTIES FOLDER "tests")
 
-nxtest_discover_tests(nx_live2d_tests LABELS live2d)
+# These are the proprietary-fixture cases: written against one development
+# model's exact numbers, so they skip without NX_LIVE2D_FIXTURE_DIR. A separate
+# label keeps them off a required CI run, which leans on the bundled suite below.
+nxtest_discover_tests(nx_live2d_tests LABELS live2d-proprietary)
+
+# The always-on suite. Hiyori is a free Live2D sample that ships under the module
+# template; it is staged into a mountable layout so these run out of a plain
+# checkout, asserting only what any Cubism export must have.
+set(_live2d_bundled "${CMAKE_CURRENT_BINARY_DIR}/bundled")
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/../templates/model/assets/live2d"
+        DESTINATION "${_live2d_bundled}")
+
+add_executable(nx_live2d_bundled_tests test_live2d_bundled.cpp)
+target_link_libraries(nx_live2d_bundled_tests
+        PRIVATE nx::test nx::foundation nx::live2d nx::compile_options)
+target_compile_definitions(nx_live2d_bundled_tests PRIVATE
+        NX_LIVE2D_BUNDLED_DIR="${_live2d_bundled}"
+        NX_REQUIRE_MODULE_FIXTURES=$<BOOL:${NX_REQUIRE_MODULE_FIXTURES}>)
+set_target_properties(nx_live2d_bundled_tests PROPERTIES FOLDER "tests")
+nxtest_discover_tests(nx_live2d_bundled_tests LABELS live2d)

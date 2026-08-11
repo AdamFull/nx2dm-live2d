@@ -24,11 +24,12 @@ namespace script = nxe::script;
 
 struct Exposed {
   nxe::Engine engine{nullptr};
+  nxe::ModuleContext ctx{engine};
   script::Host host;
   nx::vector<script::Host::ServiceInfo> services;
 
   Exposed() {
-    expose_live2d_services(host, engine);
+    expose_live2d_services(host, ctx);
     services = host.services();
   }
 
@@ -85,8 +86,9 @@ TEST_CASE("live2d scripting: the module hands them over on its own") {
   REQUIRE(found != nullptr);
 
   nxe::Engine engine{nullptr};
+  nxe::ModuleContext ctx{engine};
   script::Host host;
-  found->on_expose_scripts(host, engine);
+  found->on_expose_scripts(host, ctx);
 
   const Exposed direct;
   CHECK(host.exposed_count() == direct.services.size());

@@ -37,28 +37,28 @@ public:
     return out;
   }
 
-  bool on_register(nxe::Engine &engine) override {
+  bool on_register(nxe::ModuleContext &ctx) override {
     if (!install_platform())
       return false;
-    Live2DSystem::register_components(engine.scene().registry());
-    engine.scene().formats().add(
+    Live2DSystem::register_components(ctx.scene().registry());
+    ctx.scene().formats().add(
         nxe::scene::described<Live2DModel>("live2d", "live2d_models"));
     return true;
   }
 
   void on_expose_scripts(nxe::script::Host &host,
-                         nxe::Engine &engine) override {
-    expose_live2d_services(host, engine);
+                         nxe::ModuleContext &ctx) override {
+    expose_live2d_services(host, ctx);
   }
 
-  bool on_attach(nxe::Engine &engine) override {
+  bool on_attach(nxe::ModuleContext &ctx) override {
     const bool can_draw = m_renderer.init(
-        engine.device(), engine.load_shader(SHADER),
-        engine.samplers().index(nxe::scene::sampler_bilinear()));
+        ctx.device(), ctx.load_shader(SHADER),
+        ctx.samplers().index(nxe::scene::sampler_bilinear()));
     if (!can_draw)
       nx::logw("live2d: no renderer; models will load and pose but not draw");
 
-    const nxe::rhi::DeviceCaps &caps = engine.device().caps();
+    const nxe::rhi::DeviceCaps &caps = ctx.device().caps();
     const u32 max_mask_resolution =
         nx::min(caps.max_texture_2d != 0 ? caps.max_texture_2d : 2048u,
                 2048u);
@@ -70,51 +70,51 @@ public:
     m_system.set_mask_limits(max_mask_resolution, memory_budget);
 
     m_system.set_resolver(
-        TextureResolver([&engine](const nx::string_view path) {
-          const nxe::rhi::TextureHandle texture = engine.load_texture(path);
+        TextureResolver([&ctx](const nx::string_view path) {
+          const nxe::rhi::TextureHandle texture = ctx.load_texture(path);
           if (!texture.valid())
             return pack_texture(NX_TEXTURE_NONE, 0);
           return pack_texture(
-              engine.device().texture_index(texture),
-              engine.samplers().index(nxe::scene::sampler_bilinear()));
+              ctx.device().texture_index(texture),
+              ctx.samplers().index(nxe::scene::sampler_bilinear()));
         }));
 
-    engine.schedule().define(
+    ctx.schedule().define(
         LOAD_SYSTEM,
-        nxe::sys::SystemFn([this, &engine](const nxe::sys::Context &c) {
-          (void)m_system.load_pending(engine.scene().registry(), c.dt);
+        nxe::sys::SystemFn([this, &ctx](const nxe::sys::Context &c) {
+          (void)m_system.load_pending(ctx.scene().registry(), c.dt);
         }));
-    engine.schedule().add(nxe::sys::Stage::Update, LOAD_SYSTEM);
+    ctx.schedule().add(nxe::sys::Stage::Update, LOAD_SYSTEM);
 
-    engine.schedule().define(
+    ctx.schedule().define(
         UPDATE_SYSTEM,
-        nxe::sys::SystemFn([this, &engine](const nxe::sys::Context &c) {
-          (void)drive_lip_sync(engine, m_system);
-          (void)m_system.update(engine.scene().registry(), c.dt);
+        nxe::sys::SystemFn([this, &ctx](const nxe::sys::Context &c) {
+          (void)drive_lip_sync(ctx, m_system);
+          (void)m_system.update(ctx.scene().registry(), c.dt);
         }));
-    engine.schedule().add(nxe::sys::Stage::Update, UPDATE_SYSTEM);
+    ctx.schedule().add(nxe::sys::Stage::Update, UPDATE_SYSTEM);
 
-    engine.schedule().define(
+    ctx.schedule().define(
         EMIT_SYSTEM,
-        nxe::sys::SystemFn([this, &engine](const nxe::sys::Context &) {
-          nxe::r2d::FramePacket *const packet = engine.frame_packet();
+        nxe::sys::SystemFn([this, &ctx](const nxe::sys::Context &) {
+          nxe::r2d::FramePacket *const packet = ctx.frame_packet();
           if (packet == nullptr)
             return;
           Frame &frame = packet->channel<Frame>();
           frame.clear();
           const SceneView view{.camera = packet->active_camera,
-                               .depth_min = engine.renderer().depth_min(),
-                               .depth_max = engine.renderer().depth_max()};
-          (void)m_system.emit(engine.scene().registry(), frame, view);
+                               .depth_min = ctx.renderer().depth_min(),
+                               .depth_max = ctx.renderer().depth_max()};
+          (void)m_system.emit(ctx.scene().registry(), frame, view);
         }));
-    engine.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
+    ctx.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
 
     if (!can_draw)
       return true;
 
-    engine.passes().define(
-        DRAW_PASS, nxe::PassFn([this, &engine](nxe::rg::RenderGraph &graph,
-                                               nxe::RenderContext &context) {
+    ctx.passes().define(
+        DRAW_PASS, nxe::PassFn([this, &ctx](nxe::rg::RenderGraph &graph,
+                                            nxe::RenderContext &context) {
           const Frame *const frame = context.packet != nullptr
                                          ? context.packet->find_channel<Frame>()
                                          : nullptr;
@@ -122,16 +122,16 @@ public:
             return;
 
           const nxe::rhi::Format format =
-              engine.config().scene_format == nxe::rhi::Format::Unknown
-                  ? engine.device().swapchain_format()
-                  : engine.config().scene_format;
-          m_renderer.draw(engine.device(), graph,
+              ctx.config().scene_format == nxe::rhi::Format::Unknown
+                  ? ctx.device().swapchain_format()
+                  : ctx.config().scene_format;
+          m_renderer.draw(ctx.device(), graph,
                           context.target(nxe::TARGET_SCENE_COLOR), format,
                           context.scene_push.cameras, *frame);
         }));
 
     static constexpr nx::string_view MINE[] = {DRAW_PASS};
-    if (!engine.fill_pass_slot(WORLD_SLOT, MINE, name()))
+    if (!ctx.fill_pass_slot(WORLD_SLOT, MINE, name()))
       nx::logw("live2d: nothing to fill; the frame has no '{}' slot",
                WORLD_SLOT);
 
@@ -139,14 +139,14 @@ public:
     return true;
   }
 
-  void on_detach(nxe::Engine &engine) override {
-    m_renderer.shutdown(engine.device());
+  void on_detach(nxe::ModuleContext &ctx) override {
+    m_renderer.shutdown(ctx.device());
     uninstall_platform();
   }
 
-  void on_low_memory(nxe::Engine &engine) override {
+  void on_low_memory(nxe::ModuleContext &ctx) override {
     const usize reduced =
-        m_system.on_low_memory(engine.scene().registry());
+        m_system.on_low_memory(ctx.scene().registry());
     nx::logi("live2d: low memory reduced {} mask layout(s); future masks are "
              "capped at {}px and {} KiB per frame",
              reduced, m_system.mask_resolution_limit(),
