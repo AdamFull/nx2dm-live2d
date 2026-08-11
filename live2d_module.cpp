@@ -23,11 +23,18 @@ constexpr nx::string_view UPDATE_SYSTEM = "live2d.update";
 constexpr nx::string_view EMIT_SYSTEM = "live2d.emit";
 constexpr nx::string_view WORLD_SLOT = "world";
 constexpr nx::string_view SHADER = "live2d/live2d";
+constexpr nxe::ModuleService PROVIDED_SERVICES[] = {
+    {.id = "live2d.animation", .version = {1, 0, 0}},
+};
 
 class Live2DModule final : public nxe::Module {
 public:
-  [[nodiscard]] nx::string_view name() const noexcept override {
-    return "live2d";
+  [[nodiscard]] nxe::ModuleDescriptor descriptor() const noexcept override {
+    nxe::ModuleDescriptor out{};
+    out.id = "live2d";
+    out.version = {1, 0, 0};
+    out.provided_services = PROVIDED_SERVICES;
+    return out;
   }
 
   bool on_register(nxe::Engine &engine) override {
