@@ -23,15 +23,12 @@ using namespace nxe;
 using namespace nxm::live2d;
 
 /// Asks for nothing, so what the engine ends up with came from the module.
-class QuietGame final : public IGame {
-public:
-  void configure(EngineConfig &config) override {
-    config.calibrate = false;
-    config.action_map = {};
-    config.physics_rules = {};
-    config.audio = false;
-  }
-};
+void quiet_configure(EngineConfig &config) {
+  config.calibrate = false;
+  config.action_map = {};
+  config.physics_rules = {};
+  config.audio = false;
+}
 
 /// The engine with the module added the way NX_IMPLEMENT_GAME adds it.
 struct Harness {
@@ -40,7 +37,7 @@ struct Harness {
   bool ready = false;
 
   Harness() {
-    engine = std::make_unique<Engine>(std::make_unique<QuietGame>());
+    engine = std::make_unique<Engine>(Game{.configure = quiet_configure});
     for (Module *const module : enabled_modules())
       engine->add_module(module);
     // The build's own output directory, so load_shader finds the module's
