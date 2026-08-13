@@ -141,6 +141,9 @@ public:
 
   void on_detach(nxe::ModuleContext &ctx) override {
     m_renderer.shutdown(ctx.device());
+  }
+
+  void on_unregister(nxe::ModuleContext &) override {
     uninstall_platform();
   }
 
