@@ -24,7 +24,7 @@ constexpr nx::string_view EMIT_SYSTEM = "live2d.emit";
 constexpr nx::string_view WORLD_SLOT = "world";
 constexpr nx::string_view SHADER = "live2d/live2d";
 constexpr nxe::ModuleService PROVIDED_SERVICES[] = {
-    {.id = "live2d.animation", .version = {1, 0, 0}},
+    {.id = SERVICE, .version = {1, 0, 0}},
 };
 
 class Live2DModule final : public nxe::Module {
@@ -40,6 +40,11 @@ public:
   bool on_register(nxe::ModuleContext &ctx) override {
     if (!install_platform())
       return false;
+    if (!ctx.services().provide(SERVICE, PROVIDED_SERVICES[0].version,
+                                m_system)) {
+      uninstall_platform();
+      return false;
+    }
     Live2DSystem::register_components(ctx.scene().registry());
     ctx.scene().formats().add(
         nxe::scene::described<Live2DModel>("live2d", "live2d_models"));

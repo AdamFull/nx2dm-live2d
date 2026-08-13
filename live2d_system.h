@@ -10,6 +10,8 @@
 
 namespace nxm::live2d {
 
+inline constexpr nx::string_view SERVICE = "live2d.animation";
+
 struct SceneView {
   u32 camera = 0;
   f32 depth_min = -1024.f;
