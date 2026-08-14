@@ -38,8 +38,8 @@ struct Harness {
 
   Harness() {
     engine = std::make_unique<Engine>(Game{.configure = quiet_configure});
-    for (Module *const module : enabled_modules())
-      engine->add_module(module);
+    for (const ModuleFactory factory : enabled_module_factories())
+      engine->add_module(factory());
     // The build's own output directory, so load_shader finds the module's
     // shader where a game would find it.
     platform.set_assets_path(NX_TEST_RUNTIME_DIR);
@@ -67,8 +67,10 @@ struct Harness {
 
 TEST_CASE("live2d: the module is in the build's registry") {
   bool found = false;
-  for (const Module *const module : enabled_modules())
-    found = found || module->name() == "live2d";
+  for (const ModuleFactory factory : enabled_module_factories()) {
+    const std::unique_ptr<Module> module = factory();
+    found = found || (module != nullptr && module->name() == "live2d");
+  }
   CHECK(found);
 }
 

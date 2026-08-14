@@ -79,10 +79,12 @@ TEST_CASE("live2d scripting: the module hands them over on its own") {
   // a game asking. Nothing else would fail if the override were dropped: the
   // module still builds, still attaches, still draws, and the services simply
   // are not there.
-  nxe::Module *found = nullptr;
-  for (nxe::Module *const module : nxe::enabled_modules())
+  std::unique_ptr<nxe::Module> found;
+  for (const nxe::ModuleFactory factory : nxe::enabled_module_factories()) {
+    std::unique_ptr<nxe::Module> module = factory();
     if (module != nullptr && module->name() == "live2d")
-      found = module;
+      found = std::move(module);
+  }
   REQUIRE(found != nullptr);
 
   nxe::Engine engine{nxe::Game{}};
