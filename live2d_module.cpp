@@ -57,8 +57,8 @@ public:
                           ctx.samplers().index(nxe::scene::sampler_bilinear()));
     }));
 
-    if (!ctx.services().provide(SERVICE, PROVIDED_SERVICES[0].version,
-                                m_system)) {
+    if (!ctx.service_registrar().provide(SERVICE, PROVIDED_SERVICES[0].version,
+                                         m_system)) {
       uninstall_platform();
       return false;
     }
