@@ -40,6 +40,23 @@ public:
   bool on_register(nxe::ModuleContext &ctx) override {
     if (!install_platform())
       return false;
+
+    const nxe::rhi::DeviceCaps &caps = ctx.device().caps();
+    const u32 max_mask_resolution =
+        nx::min(caps.max_texture_2d != 0 ? caps.max_texture_2d : 2048u, 2048u);
+    const u64 memory_budget = caps.device_local_memory != 0
+                                  ? nx::clamp(caps.device_local_memory / 256u,
+                                              u64{4} << 20, u64{32} << 20)
+                                  : u64{16} << 20;
+    m_system.set_mask_limits(max_mask_resolution, memory_budget);
+    m_system.set_resolver(TextureResolver([&ctx](const nx::string_view path) {
+      const nxe::rhi::TextureHandle texture = ctx.load_texture(path);
+      if (!texture.valid())
+        return pack_texture(NX_TEXTURE_NONE, 0);
+      return pack_texture(ctx.device().texture_index(texture),
+                          ctx.samplers().index(nxe::scene::sampler_bilinear()));
+    }));
+
     if (!ctx.services().provide(SERVICE, PROVIDED_SERVICES[0].version,
                                 m_system)) {
       uninstall_platform();
@@ -57,32 +74,11 @@ public:
   }
 
   bool on_attach(nxe::ModuleContext &ctx) override {
-    const bool can_draw = m_renderer.init(
-        ctx.device(), ctx.load_shader(SHADER),
-        ctx.samplers().index(nxe::scene::sampler_bilinear()));
+    const bool can_draw =
+        m_renderer.init(ctx.device(), ctx.load_shader(SHADER),
+                        ctx.samplers().index(nxe::scene::sampler_bilinear()));
     if (!can_draw)
       nx::logw("live2d: no renderer; models will load and pose but not draw");
-
-    const nxe::rhi::DeviceCaps &caps = ctx.device().caps();
-    const u32 max_mask_resolution =
-        nx::min(caps.max_texture_2d != 0 ? caps.max_texture_2d : 2048u,
-                2048u);
-    const u64 memory_budget =
-        caps.device_local_memory != 0
-            ? nx::clamp(caps.device_local_memory / 256u, u64{4} << 20,
-                        u64{32} << 20)
-            : u64{16} << 20;
-    m_system.set_mask_limits(max_mask_resolution, memory_budget);
-
-    m_system.set_resolver(
-        TextureResolver([&ctx](const nx::string_view path) {
-          const nxe::rhi::TextureHandle texture = ctx.load_texture(path);
-          if (!texture.valid())
-            return pack_texture(NX_TEXTURE_NONE, 0);
-          return pack_texture(
-              ctx.device().texture_index(texture),
-              ctx.samplers().index(nxe::scene::sampler_bilinear()));
-        }));
 
     ctx.schedule().define(
         LOAD_SYSTEM,
@@ -149,12 +145,12 @@ public:
   }
 
   void on_unregister(nxe::ModuleContext &) override {
+    m_system.set_resolver({});
     uninstall_platform();
   }
 
   void on_low_memory(nxe::ModuleContext &ctx) override {
-    const usize reduced =
-        m_system.on_low_memory(ctx.scene().registry());
+    const usize reduced = m_system.on_low_memory(ctx.scene().registry());
     nx::logi("live2d: low memory reduced {} mask layout(s); future masks are "
              "capped at {}px and {} KiB per frame",
              reduced, m_system.mask_resolution_limit(),
