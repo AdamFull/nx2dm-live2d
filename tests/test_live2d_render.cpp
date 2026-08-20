@@ -42,11 +42,13 @@ namespace rhi = nxe::rhi;
 constexpr u32 TARGET = 256;
 
 /// What the mesh pass pushes, spelled here rather than included: nx_engine owns
-/// MeshPushBlock and this target links no engine.
+/// MeshPushBlock and this target links no engine. material_words left 0 keeps
+/// the shader off the material buffer this test binds none of.
 struct MeshPush {
   u64 cameras = 0;
   u64 vertices = 0;
   u64 indices = 0;
+  u64 materials = 0;
   ::MeshPushFields fields = {};
 };
 
