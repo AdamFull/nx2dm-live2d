@@ -41,6 +41,8 @@ struct ModelView {
   u32 camera = 0;
   f32 depth_min = -1024.f;
   f32 depth_max = 1024.f;
+  u32 batch = 0;
+  u32 material = 0;
 };
 
 usize emit_model(const ModelAsset &asset, const ModelView &view,

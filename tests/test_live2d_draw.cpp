@@ -107,6 +107,24 @@ TEST_CASE("live2d: the emitted geometry keeps Cubism's texture convention") {
   CHECK(emitted_agreement(channel) < -0.5f);
 }
 
+TEST_CASE("live2d: the view's material rides every emitted draw") {
+  NX_REQUIRE_FIXTURE();
+  Loaded fixture;
+  REQUIRE(fixture.ok);
+
+  // The system resolves a component's material to these two numbers; emit_model
+  // is what stamps them onto every draw of the model.
+  ModelView view;
+  view.batch = 5u;
+  view.material = 8u;
+  r2d::MeshChannel channel;
+  REQUIRE(emit_model(fixture.asset, view, channel) > 0u);
+  for (const r2d::MeshDraw &draw : channel.draws) {
+    CHECK(draw.batch == 5u);
+    CHECK(draw.material == 8u);
+  }
+}
+
 TEST_CASE("live2d: a posed model becomes mesh draws in render order") {
   NX_REQUIRE_FIXTURE();
   Loaded fixture;

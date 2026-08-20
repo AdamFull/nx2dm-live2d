@@ -32,6 +32,7 @@ struct Live2DModel {
   f32 mouth = 0.f;
   u32 voice = 0;
   f32 lip_sync_gain = 3.f;
+  u32 material = 0;
 };
 
 struct Live2DRuntime {

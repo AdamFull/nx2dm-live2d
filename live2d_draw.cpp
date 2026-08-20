@@ -314,6 +314,8 @@ usize emit(const ModelAsset &asset, const ModelView &view,
     draw.sort_key = key;
     draw.camera = view.camera;
     draw.blend = blend;
+    draw.batch = view.batch;
+    draw.material = view.material;
     ++appended;
 
     if (out_masks != nullptr)

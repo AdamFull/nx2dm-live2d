@@ -1,6 +1,7 @@
 #include "live2d/live2d_system.h"
 
 #include "core/foundation/diagnostics/log.h"
+#include "core/rendering/render2d/material_system.h"
 
 #include <cmath>
 
@@ -163,6 +164,12 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
         emit_view.camera = view.camera;
         emit_view.depth_min = view.depth_min;
         emit_view.depth_max = view.depth_max;
+        // A custom material applies to the whole model: its batch and parameter
+        // offset ride every draw, overriding the per-drawable blend.
+        if (view.materials != nullptr && model.material != 0u) {
+          emit_view.batch = view.materials->batch_of(model.material);
+          emit_view.material = view.materials->offset_of(model.material);
+        }
 
         const u32 size = runtime.masks.atlas_size();
         const u32 count = runtime.masks.atlas_count();

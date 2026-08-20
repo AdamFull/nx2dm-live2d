@@ -8,6 +8,10 @@
 #include "live2d/live2d_component.h"
 #include "live2d/live2d_pass.h"
 
+namespace nxe::r2d {
+class MaterialSystem;
+}
+
 namespace nxm::live2d {
 
 inline constexpr nx::string_view SERVICE = "live2d.animation";
@@ -16,6 +20,7 @@ struct SceneView {
   u32 camera = 0;
   f32 depth_min = -1024.f;
   f32 depth_max = 1024.f;
+  const nxe::r2d::MaterialSystem *materials = nullptr;
 };
 
 class Live2DSystem {

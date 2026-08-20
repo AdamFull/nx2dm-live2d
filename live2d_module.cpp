@@ -105,7 +105,8 @@ public:
           frame.clear();
           const SceneView view{.camera = packet->active_camera,
                                .depth_min = ctx.renderer().depth_min(),
-                               .depth_max = ctx.renderer().depth_max()};
+                               .depth_max = ctx.renderer().depth_max(),
+                               .materials = ctx.renderer().materials()};
           (void)m_system.emit(ctx.scene().registry(), frame, view);
         }));
     ctx.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
