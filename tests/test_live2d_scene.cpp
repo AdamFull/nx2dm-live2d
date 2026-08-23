@@ -1,7 +1,3 @@
-/**
- * @file test_live2d_scene.cpp
- * @brief A model on an entity, through the system, into a frame.
- */
 
 #include "framework/nxtest.h"
 
@@ -56,7 +52,7 @@ struct World {
   }
 };
 
-} // namespace
+}
 
 TEST_CASE("live2d: mask limits retain a safe minimum under memory pressure") {
   scene::registry_t registry;
@@ -109,10 +105,8 @@ TEST_CASE("live2d: a failed model retries with exponential backoff") {
   CHECK(runtime.load_failures == 1u);
   CHECK(runtime.retry_in == 1.f);
 
-  // No retry storm while no simulation time passes.
   CHECK(system.load_pending(registry) == 0u);
   CHECK(runtime.load_failures == 1u);
-  // The deadline retries, fails again, and doubles the delay.
   CHECK(system.load_pending(registry, 1.f) == 0u);
   CHECK(runtime.load_failures == 2u);
   CHECK(runtime.retry_in == 2.f);
@@ -127,8 +121,6 @@ TEST_CASE("live2d: a model named by a component is loaded, posed and drawn") {
   REQUIRE(world.ok);
 
   const scene::Entity e = world.place(MODEL);
-  // Nothing is loaded until the loading system runs, so a frame emitted before
-  // it draws nothing rather than reaching into a component that has no moc.
   Frame early;
   CHECK(world.system.emit(world.registry, early, {}) == 0u);
   CHECK(early.empty());
@@ -140,8 +132,6 @@ TEST_CASE("live2d: a model named by a component is loaded, posed and drawn") {
   CHECK(runtime->loaded == MODEL);
   CHECK(runtime->masks.active());
 
-  // Loading once. A second pass over an unchanged component reloads nothing,
-  // which is what makes it safe to run every frame.
   CHECK(world.system.load_pending(world.registry) == 0u);
 
   CHECK(world.system.update(world.registry, 1.f / 60.f) == 1u);
@@ -154,7 +144,6 @@ TEST_CASE("live2d: a model named by a component is loaded, posed and drawn") {
   REQUIRE(frame.atlas_sizes.size() == runtime->masks.atlas_count());
   CHECK(frame.atlas_sizes[0] == runtime->masks.atlas_size());
 
-  // The resolver's answer reached the draws rather than being dropped.
   for (const nxe::r2d::MeshDraw &draw : frame.geometry.draws)
     CHECK((draw.texture >> 16) == PAGE);
 }
@@ -177,8 +166,6 @@ TEST_CASE("live2d: the component's placement and scale reach the vertices") {
   REQUIRE(scaled.system.emit(scaled.registry, big, {}) == 1u);
 
   REQUIRE(plain.geometry.vertices.size() == big.geometry.vertices.size());
-  // Scale is folded into the node's transform, and the node puts the model at
-  // (0.5, 0.5) - so a vertex four times as far from that point.
   for (usize i = 0; i < plain.geometry.vertices.size(); ++i) {
     const glm::vec2 a = plain.geometry.vertices[i].position - glm::vec2(0.5f);
     const glm::vec2 b = big.geometry.vertices[i].position - glm::vec2(0.5f);
@@ -196,8 +183,6 @@ TEST_CASE("live2d: an invisible model is stepped but not drawn") {
   REQUIRE(world.system.load_pending(world.registry) == 1u);
   world.registry.get<Live2DModel>(e).visible = false;
 
-  // Still animated: a model hidden for a moment should not jump when it comes
-  // back, which it would if its clock stopped.
   CHECK(world.system.update(world.registry, 1.f / 60.f) == 1u);
 
   Frame frame;
@@ -216,8 +201,6 @@ TEST_CASE("live2d: a component naming nothing, or a file that is not there") {
 
   const scene::Entity missing = world.place("/nothing/here.model3.json");
 
-  // The empty one is not a request to load anything; the missing one is a
-  // request that cannot be met.
   CHECK(world.system.load_pending(world.registry) == 0u);
   CHECK(world.registry.try_get<Live2DRuntime>(empty) == nullptr);
 
@@ -225,9 +208,6 @@ TEST_CASE("live2d: a component naming nothing, or a file that is not there") {
       world.registry.try_get<Live2DRuntime>(missing);
   REQUIRE(failed != nullptr);
   CHECK_FALSE(failed->ready());
-  // Failed is not loaded. It is remembered separately and retried with a
-  // backoff, so a late mount/hot-deployed file can recover without logging on
-  // every frame.
   CHECK(failed->loaded.empty());
   CHECK(failed->requested == "/nothing/here.model3.json");
   CHECK(failed->load_failures == 1u);
@@ -251,15 +231,12 @@ TEST_CASE("live2d: a voice opens the mouth, and letting go closes it") {
   REQUIRE(world.system.load_pending(world.registry) == 1u);
   Live2DModel &model = world.registry.get<Live2DModel>(e);
 
-  // No voice, no lip sync - a component driving its mouth by hand should not
-  // have it overwritten.
   model.mouth = 0.4f;
   CHECK(world.system.drive_lip_sync(
             world.registry,
             Live2DSystem::VoiceLevel([](u32) { return 1.f; })) == 0u);
   CHECK(model.mouth == 0.4f);
 
-  // A quarter loud, gain three, so three quarters open.
   model.voice = 17;
   CHECK(world.system.drive_lip_sync(world.registry,
                                     Live2DSystem::VoiceLevel([](const u32 v) {
@@ -268,14 +245,11 @@ TEST_CASE("live2d: a voice opens the mouth, and letting go closes it") {
                                     })) == 1u);
   CHECK(std::fabs(model.mouth - 0.75f) < 1e-5f);
 
-  // Loud enough to clip, rather than driving the parameter past its range.
   CHECK(world.system.drive_lip_sync(
             world.registry,
             Live2DSystem::VoiceLevel([](u32) { return 0.9f; })) == 1u);
   CHECK(model.mouth == 1.f);
 
-  // The line ends. The mouth closes and the handle goes, so a later voice
-  // landing on the same slot does not start driving this model.
   CHECK(world.system.drive_lip_sync(
             world.registry,
             Live2DSystem::VoiceLevel([](u32) { return -1.f; })) == 0u);

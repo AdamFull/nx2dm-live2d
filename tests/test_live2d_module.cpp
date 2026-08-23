@@ -1,13 +1,3 @@
-/**
- * @file test_live2d_module.cpp
- * @brief The module attaching to an Engine.
- *
- * The forty lines that wire the systems, the pass, the slot, the scene format
- * and the script bindings were the last part of this module with nothing
- * covering them - every piece they wire was tested and the wiring itself was
- * not. Cheap to get wrong, too: a system defined and never added to a stage
- * runs silently never, and so does a pass that fills no slot.
- */
 
 #include "framework/nxtest.h"
 
@@ -22,7 +12,6 @@ namespace {
 using namespace nxe;
 using namespace nxm::live2d;
 
-/// Asks for nothing, so what the engine ends up with came from the module.
 void quiet_configure(EngineConfig &config) {
   config.calibrate = false;
   config.action_map = {};
@@ -30,7 +19,6 @@ void quiet_configure(EngineConfig &config) {
   config.audio = false;
 }
 
-/// The engine with the module added the way NX_IMPLEMENT_GAME adds it.
 struct Harness {
   test::StubPlatform platform;
   std::unique_ptr<Engine> engine;
@@ -40,8 +28,6 @@ struct Harness {
     engine = std::make_unique<Engine>(Game{.configure = quiet_configure});
     for (const ModuleFactory factory : enabled_module_factories())
       engine->add_module(factory());
-    // The build's own output directory, so load_shader finds the module's
-    // shader where a game would find it.
     platform.set_assets_path(NX_TEST_RUNTIME_DIR);
     rt::AppConfig config;
     engine->configure(config);
@@ -63,7 +49,7 @@ struct Harness {
   return false;
 }
 
-} // namespace
+}
 
 TEST_CASE("live2d: the module is in the build's registry") {
   bool found = false;
@@ -79,12 +65,9 @@ TEST_CASE("live2d: attaching wires the systems, the pass and the slot") {
   if (!h.ready)
     SKIP("no usable RHI device");
 
-  // Registered before the game runs, so a scene naming a Live2DModel loads.
   CHECK(h.engine->scene().registry().is_component_registered<Live2DModel>());
   CHECK(h.engine->scene().registry().is_component_registered<Live2DRuntime>());
 
-  // Defined *and* placed in a stage. A system that is only defined never runs
-  // - "nothing runs because it exists" - and that is the easier half to forget.
   const nx::vector<nx::string> unplaced = h.engine->schedule().unplaced();
   for (const nx::string_view name :
        {"live2d.load", "live2d.update", "live2d.emit"}) {
@@ -95,8 +78,6 @@ TEST_CASE("live2d: attaching wires the systems, the pass and the slot") {
     CHECK_FALSE(forgotten);
   }
 
-  // The pass reached the frame through the `world` slot, in the right place:
-  // after the scene target is opened and before the UI goes over it.
   CHECK(h.engine->passes().defined("live2d.draw"));
   REQUIRE(ordered(*h.engine, "live2d.draw"));
 
@@ -123,8 +104,6 @@ TEST_CASE("live2d: the component reaches the scene format table") {
   if (!h.ready)
     SKIP("no usable RHI device");
 
-  // Without this a .nxscene carrying a model loads it as nothing at all, with
-  // no error: an unknown key in a scene document is simply skipped.
   bool described = false;
   for (const scene::ComponentIO &io : h.engine->scene().formats().entries())
     described = described || io.node_key == "live2d";
@@ -136,8 +115,6 @@ TEST_CASE("live2d: a frame with no model costs the module nothing") {
   if (!h.ready)
     SKIP("no usable RHI device");
 
-  // The systems run every frame in every project that enables the module. A
-  // scene with no Live2DModel in it should not notice.
   h.platform.advance(1.0 / 60.0);
   h.engine->on_tick(h.platform, 1.0 / 60.0);
   CHECK(h.engine->frame_index() == 1u);

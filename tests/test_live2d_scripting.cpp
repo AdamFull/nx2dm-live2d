@@ -1,15 +1,3 @@
-/**
- * @file test_live2d_scripting.cpp
- * @brief What the module hands a script, and the shape of it.
- *
- * The build writes these signatures into the declarations a type checker reads,
- * so a renamed service or a moved argument is not a compile error anywhere - it
- * is a script that stops type-checking, or worse, one that still does and calls
- * the wrong thing. This is where that gets caught.
- *
- * No backend and no started Engine: Host::expose records, and only bind() needs
- * a VM. The generated manifest is checked against the same surface at startup.
- */
 
 #include "framework/nxtest.h"
 
@@ -42,15 +30,12 @@ struct Exposed {
   }
 };
 
-} // namespace
+}
 
 TEST_CASE("live2d scripting: every service is exposed with the shape a script "
           "is told about") {
   const Exposed exposed;
 
-  // Spelled out rather than counted: the whole point is that a script's
-  // declaration and this list cannot drift, and a count would let a rename
-  // through.
   static constexpr struct {
     nx::string_view name;
     nx::string_view signature;
@@ -74,11 +59,6 @@ TEST_CASE("live2d scripting: every service is exposed with the shape a script "
 }
 
 TEST_CASE("live2d scripting: the module hands them over on its own") {
-  // Through Module::on_expose_scripts and not the free function, because that
-  // hook being wired is the whole of what makes a script reach a model without
-  // a game asking. Nothing else would fail if the override were dropped: the
-  // module still builds, still attaches, still draws, and the services simply
-  // are not there.
   std::unique_ptr<nxe::Module> found;
   for (const nxe::ModuleFactory factory : nxe::enabled_module_factories()) {
     std::unique_ptr<nxe::Module> module = factory();

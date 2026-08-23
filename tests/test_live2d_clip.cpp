@@ -1,12 +1,3 @@
-/**
- * @file test_live2d_clip.cpp
- * @brief Masking, on a real device, read back off it.
- *
- * The claim is absolute rather than comparative: a clipped drawable rendered
- * with its mask, and the same drawable with the mask inverted, together cover
- * what the drawable covers unclipped - and separately they barely overlap. A
- * mask that did nothing, or that landed in the wrong tile, fails both halves.
- */
 
 #include "framework/nxtest.h"
 
@@ -35,8 +26,6 @@ namespace rhi = nxe::rhi;
 constexpr u32 TARGET = 256;
 constexpr u32 ATLAS = 512;
 
-/// Mirrors Live2DPush in shaders/live2d.slang. Vectors, then pointers, then
-/// scalars, so neither side has any padding to agree about.
 struct Live2DPush {
   glm::vec4 mask_row0{0.f};
   glm::vec4 mask_row1{0.f};
@@ -86,7 +75,6 @@ struct TestDevice {
   });
 }
 
-/// The affine's two rows as the shader wants them.
 void put_affine(Live2DPush &push, const glm::mat3 &m) noexcept {
   push.mask_row0 = glm::vec4(m[0][0], m[1][0], m[2][0], 0.f);
   push.mask_row1 = glm::vec4(m[0][1], m[1][1], m[2][1], 0.f);
@@ -106,7 +94,6 @@ void put_affine(Live2DPush &push, const glm::mat3 &m) noexcept {
   return n;
 }
 
-/// Pixels lit in both. A mask and its inverse should agree on almost nothing.
 [[nodiscard]] usize both(const nx::vector<u8> &a,
                          const nx::vector<u8> &b) noexcept {
   usize n = 0;
@@ -116,7 +103,6 @@ void put_affine(Live2DPush &push, const glm::mat3 &m) noexcept {
   return n;
 }
 
-/// Pixels lit in either.
 [[nodiscard]] usize either(const nx::vector<u8> &a,
                            const nx::vector<u8> &b) noexcept {
   usize n = 0;
@@ -126,7 +112,7 @@ void put_affine(Live2DPush &push, const glm::mat3 &m) noexcept {
   return n;
 }
 
-} // namespace
+}
 
 TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
           "rest") {
@@ -156,7 +142,6 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   masks.update(asset);
   REQUIRE(masks.active());
 
-  // World [0,1]^2 onto the target, the model shrunk into the middle of it.
   ModelView view;
   view.world[0][0] = 0.8f;
   view.world[1][1] = 0.8f;
@@ -171,8 +156,6 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   MaskChannel shapes;
   REQUIRE(emit_masks(asset, masks, shapes) > 0u);
 
-  // One clipped drawable, rendered alone. The whole model would let an
-  // unclipped neighbour's pixels stand in for the ones a broken mask lost.
   usize subject = model.draws.size();
   for (usize i = 0; i < clips.size(); ++i)
     if (clips[i].clipped() && model.draws[i].index_count > 60u) {
@@ -205,8 +188,6 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
       .fragment = {.shader = shader, .entry_point = "mask_fs"},
       .color_formats = {rhi::Format::RGBA8_UNORM},
       .color_count = 1,
-      // Additive so two shapes in one group union, and so channels written by
-      // different groups do not overwrite each other.
       .blend = {{.enabled = true,
                  .mode = rhi::BlendMode::PremultipliedAdditive}},
   });
@@ -258,9 +239,6 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
       upload("live2d mask indices", shapes.indices.data(),
              nx::cast<u64>(shapes.indices.size()) * sizeof(u32));
 
-  // A real sampler. sampler_index({}) is an invalid handle and answers 0xFFFF,
-  // which packs into a word whose high half is not kTextureNone - so the
-  // shader samples texture zero through nothing and every mask reads as empty.
   const rhi::SamplerHandle sampler = device.create_sampler({
       .name = "live2d mask",
       .address_u = rhi::AddressMode::ClampToEdge,
@@ -272,7 +250,6 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   REQUIRE((atlas_packed >> 16) != NX_TEXTURE_NONE);
   REQUIRE((atlas_packed & 0xFFFFu) != 0xFFFFu);
 
-  // Three passes over the same drawable: no mask, its mask, its mask inverted.
   enum Pass : u32 { Unclipped, Clipped, Inverted, PassCount };
   nx::vector<u8> frames[PassCount];
   usize covered[4] = {};
@@ -281,7 +258,6 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
     rhi::CommandContext cmd;
     REQUIRE(device.begin_headless_frame(cmd));
 
-    // The mask atlas, cleared to nothing and drawn into.
     cmd.barrier(rhi::TextureBarrier{.texture = atlas,
                                     .from = rhi::ResourceState::Undefined,
                                     .to = rhi::ResourceState::ColorAttachment});
@@ -315,7 +291,6 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
                                     .from = rhi::ResourceState::ColorAttachment,
                                     .to = rhi::ResourceState::ShaderReadOnly});
 
-    // The one drawable, sampling it.
     cmd.barrier(rhi::TextureBarrier{.texture = target,
                                     .from = rhi::ResourceState::Undefined,
                                     .to = rhi::ResourceState::ColorAttachment});
@@ -380,12 +355,6 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
     }
   }
 
-  // Every channel the layout handed out got coverage, and no other did.
-  //
-  // This is the assertion that caught weighting a mask by its shape's opacity:
-  // two of this model's six mask shapes sit at opacity zero - they are helpers
-  // that are never meant to be seen - and their channels came back empty while
-  // everything else looked fine. What they clip would have vanished.
   bool used[4] = {};
   for (const MaskGroup &group : masks.groups())
     used[nx::min(group.channel, 3u)] = true;
@@ -401,17 +370,11 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   const usize dropped = lit(frames[Inverted]);
   REQUIRE(whole > 200u);
 
-  // The mask removes something and keeps something. Either extreme means it is
-  // not being sampled: all of it says the mask read as one everywhere, none of
-  // it says zero everywhere, and both look like "masking is off".
   CHECK(kept > 0u);
   CHECK(kept < whole);
   CHECK(dropped > 0u);
   CHECK(dropped < whole);
 
-  // And the two halves are halves: together they are the whole drawable, and
-  // separately they hardly overlap. This is the part a mask in the wrong tile
-  // cannot fake - it would drop pixels from both.
   CHECK(either(frames[Clipped], frames[Inverted]) > whole * 95u / 100u);
   CHECK(both(frames[Clipped], frames[Inverted]) < whole / 10u);
 

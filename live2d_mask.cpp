@@ -12,9 +12,6 @@ namespace {
 namespace csm = Live2D::Cubism::Framework;
 namespace render = Live2D::Cubism::Framework::Rendering;
 
-/// The manager holds a pointer to the current render target and compares it
-/// against the one a group wants. Nothing in the template dereferences it, and
-/// the layout half never sets it, so a tag is the whole type it needs.
 struct NoTarget {};
 
 class Context final : public render::CubismClippingContext {
@@ -34,21 +31,15 @@ public:
   return out;
 }
 
-/// Cubism's own margin around a mask's bounds, so the edge of the clipped art
-/// does not land exactly on the edge of its tile.
 constexpr f32 MARGIN = 0.05f;
 
 const MaskRef UNCLIPPED{};
 
-} // namespace
+}
 
-/// The CPU half of what a Cubism backend's SetupClippingContext does. The GPU
-/// half - beginning a render pass on the mask texture and drawing the shapes
-/// into it - is the caller's, and is what keeps this testable with no device.
 class MaskLayout::Clipping final
     : public render::CubismClippingManager<Context, NoTarget> {
 public:
-  /// Returns how many groups are in use in the pose the model is in now.
   usize setup(csm::CubismModel &model) {
     usize using_count = 0;
     for (csm::csmUint32 i = 0; i < _clippingContextListForMask.GetSize(); ++i) {
@@ -165,8 +156,6 @@ void MaskLayout::update(const ModelAsset &asset) {
   if (m_clipping->setup(*model) == 0u)
     return;
 
-  // Built in two passes so the group indices a MaskRef holds are stable: a
-  // group that turned out to be unused is not in the list at all.
   csm::csmVector<Context *> &masks = m_clipping->masks();
   nx::vector<i32> group_of;
   group_of.resize(nx::cast<usize>(masks.GetSize()), -1);
@@ -234,4 +223,4 @@ const MaskRef &MaskLayout::of(const i32 drawable) const noexcept {
   return m_refs[nx::cast<usize>(drawable)];
 }
 
-} // namespace nxm::live2d
+}

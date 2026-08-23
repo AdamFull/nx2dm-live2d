@@ -1,10 +1,5 @@
 #pragma once
 
-/**
- * @file live2d_animator.h
- * @brief Driving one model through a frame (namespace nxm::live2d).
- */
-
 #include "live2d/live2d_assets.h"
 
 namespace nxm::live2d {
@@ -72,4 +67,4 @@ void read_parameters(const ModelAsset &asset, nx::vector<f32> &out);
 
 [[nodiscard]] f32 uv_agreement(const ModelAsset &asset) noexcept;
 
-} // namespace nxm::live2d
+}

@@ -1,10 +1,5 @@
 #pragma once
 
-/**
- * @file live2d_assets.h
- * @brief A model's shared data, loaded (namespace nxm::live2d).
- */
-
 #include "core/foundation/core/callable.h"
 #include "core/foundation/strings/utf8_string.h"
 
@@ -14,7 +9,7 @@ namespace Live2D::Cubism::Framework {
 class CubismModel;
 class CubismUserModel;
 class ACubismMotion;
-} // namespace Live2D::Cubism::Framework
+}
 
 namespace nxm::live2d {
 
@@ -44,7 +39,6 @@ struct CanvasInfo {
   [[nodiscard]] f32 height_units() const noexcept {
     return pixels_per_unit > 0.f ? height / pixels_per_unit : 0.f;
   }
-  /// The model's own zero, in the space its vertices are in.
   [[nodiscard]] f32 origin_x_units() const noexcept {
     return pixels_per_unit > 0.f ? origin_x / pixels_per_unit : 0.f;
   }
@@ -97,8 +91,6 @@ public:
   [[nodiscard]] bool has_pose() const noexcept { return m_pose; }
   [[nodiscard]] bool has_eye_blink() const noexcept { return m_eye_blink; }
 
-  /// Parameter ids the manifest filed under LipSync - what a voice drives.
-  /// Empty for a model whose author never grouped them, which is common.
   [[nodiscard]] std::span<const nx::string> lip_sync() const noexcept {
     return {m_lip_sync.data(), m_lip_sync.size()};
   }
@@ -129,4 +121,4 @@ private:
                               TextureResolver resolve, ModelAsset &out,
                               nx::string &error);
 
-} // namespace nxm::live2d
+}

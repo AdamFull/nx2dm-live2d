@@ -1,14 +1,3 @@
-# The Cubism SDK for Native: a closed binary and a source framework.
-#
-# Unlike Spine there is nothing to fetch. Cubism Core is not on any git host -
-# it comes out of the SDK archive Live2D hands you after you accept the licence
-# - so the only two possibilities are a copy in this module's third_party and a
-# path to an extract elsewhere. NX_LIVE2D_SDK_DIR is the second.
-#
-# Two targets. nx_live2d_core is the imported binary, picked per platform,
-# architecture and - on Windows - toolset and CRT. nx_live2d_framework is
-# Live2D's own C++ over it, minus the five renderer backends, because the
-# renderer is ours.
 
 set(NX_LIVE2D_SDK_DIR "" CACHE PATH
         "An extracted CubismSdkForNative. Empty uses modules/live2d/third_party.")
@@ -35,8 +24,6 @@ function(_nx_live2d_core_paths sdk out_debug out_release)
     set(_lib "${sdk}/Core/lib")
 
     if (ANDROID)
-        # No armeabi-v7a in the SDK. Saying so beats a linker error naming a
-        # symbol.
         if (NOT EXISTS "${_lib}/android/${ANDROID_ABI}/libLive2DCubismCore.a")
             message(FATAL_ERROR
                     "nx2d: Cubism Core has no ${ANDROID_ABI} slice; the SDK ships "
@@ -90,8 +77,6 @@ function(_nx_live2d_core_paths sdk out_debug out_release)
             set(_toolset 143)
         endif ()
 
-        # An empty CMAKE_MSVC_RUNTIME_LIBRARY is CMake's default, which is the
-        # DLL runtime.
         if (CMAKE_MSVC_RUNTIME_LIBRARY AND
             NOT CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "DLL")
             set(_crt MT)
@@ -174,9 +159,6 @@ function(nx_add_live2d)
             MAP_IMPORTED_CONFIG_MINSIZEREL Release
             INTERFACE_INCLUDE_DIRECTORIES "${_sdk}/Core/include")
 
-    # Everything except the five renderer backends. Their directories are the
-    # only part of the framework tied to a graphics API, and this engine's
-    # renderer is not one of them - see docs/live2d.md.
     set(_src "${_sdk}/Framework/src")
     file(GLOB _framework_sources CONFIGURE_DEPENDS
             "${_src}/*.cpp"
@@ -198,8 +180,6 @@ function(nx_add_live2d)
     # the framework is built like everything else in the tree.
     add_library(nx_live2d_framework STATIC ${_framework_sources})
     add_library(nx::live2d_framework ALIAS nx_live2d_framework)
-    # SYSTEM so its headers never trip an engine build with
-    # NX_WARNINGS_AS_ERRORS on, and no nx::compile_options for the same reason.
     target_include_directories(nx_live2d_framework SYSTEM PUBLIC "${_src}")
     target_link_libraries(nx_live2d_framework PUBLIC nx::live2d_core)
     set_target_properties(nx_live2d_framework PROPERTIES FOLDER "third_party")

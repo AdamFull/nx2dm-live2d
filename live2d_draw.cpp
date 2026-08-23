@@ -38,16 +38,12 @@ namespace core = Live2D::Cubism::Core;
   return r2d::MeshBlend::Normal;
 }
 
-/// Cubism has no per-vertex colour: a drawable's opacity and its multiply
-/// colour apply to the whole of it, so one packed word serves every vertex.
 [[nodiscard]] u32 tint(const core::csmVector4 &multiply, const f32 opacity,
                        const glm::vec4 &view) noexcept {
   return pack_color(glm::vec4(multiply.X * view.x, multiply.Y * view.y,
                               multiply.Z * view.z, opacity * view.w));
 }
 
-/// A screen colour of black is the identity, which is what an untouched
-/// drawable carries. Anything else needs the fragment shader L4 brings.
 [[nodiscard]] bool uses_screen_colour(const core::csmVector4 &screen) noexcept {
   constexpr f32 EPSILON = 1.f / 512.f;
   return screen.X > EPSILON || screen.Y > EPSILON || screen.Z > EPSILON;
@@ -60,9 +56,6 @@ namespace core = Live2D::Cubism::Core;
 static_assert(sizeof(core::csmVector2) == sizeof(glm::vec2));
 static_assert(alignof(core::csmVector2) == alignof(glm::vec2));
 
-/// The 2D affine part of one of the layout's 4x4s, as a mat3 whose third
-/// column is the translation. Those matrices only translate and scale in xy;
-/// carrying the rest of a mat4 to the GPU would cost half the push range.
 [[nodiscard]] glm::mat3 affine_of(const glm::mat4 &m) noexcept {
   glm::mat3 out(1.f);
   out[0] = glm::vec3(m[0][0], m[0][1], 0.f);
@@ -71,9 +64,6 @@ static_assert(alignof(core::csmVector2) == alignof(glm::vec2));
   return out;
 }
 
-/// Inverse of a 2D affine held as a mat3. False when it is singular: a model
-/// scaled to nothing has no inverse, and the infinities would reach the shader
-/// as a mask sampled at nowhere.
 [[nodiscard]] bool invert_affine(const glm::mat3 &m, glm::mat3 &out) noexcept {
   const f32 a = m[0][0];
   const f32 b = m[1][0];
@@ -103,13 +93,11 @@ static_assert(alignof(core::csmVector2) == alignof(glm::vec2));
       .atlas = atlas_base + ref.atlas,
       .channel = ref.channel,
       .inverted = ref.inverted,
-      // The vertices went out in world space, so the shader has to come back
-      // to model space before the layout's matrix means anything.
       .from_world = affine_of(ref.to_mask) * inverse_world,
   };
 }
 
-} // namespace
+}
 
 DrawableMesh drawable_mesh(const ModelAsset &asset,
                            const i32 drawable) noexcept {
@@ -182,11 +170,6 @@ usize emit_masks(const ModelAsset &asset, const MaskLayout &masks,
       const DrawableMesh mesh = drawable_mesh(asset, shape);
       if (!mesh.valid())
         continue;
-      // Opaque, and the mask shader does not read it. Deliberately not the
-      // shape's own opacity: a mask shape is usually an invisible helper - two
-      // of the development model's six sit at zero - so weighting coverage by
-      // it empties their masks and clips everything using them out of
-      // existence. Cubism's own mask shader is channelFlag * texture.a.
       const u32 color = pack_color(glm::vec4(1.f, 1.f, 1.f, 1.f));
 
       vertices.clear();
@@ -237,8 +220,6 @@ usize emit(const ModelAsset &asset, const ModelView &view,
   if (order == nullptr || count <= 0)
     return 0u;
 
-  // Cubism's render order is a rank per drawable, so it is turned round into a
-  // list of drawables in the order they are drawn.
   nx::vector<i32> sorted;
   sorted.reserve(nx::cast<usize>(count));
   for (i32 d = 0; d < count; ++d)
@@ -345,7 +326,7 @@ usize emit(const ModelAsset &asset, const ModelView &view,
   return appended;
 }
 
-} // namespace
+}
 
 usize emit_model(const ModelAsset &asset, const ModelView &view,
                  r2d::MeshChannel &out) {
@@ -358,4 +339,4 @@ usize emit_model(const ModelAsset &asset, const ModelView &view,
   return emit(asset, view, out, &masks, &out_masks, atlas_base);
 }
 
-} // namespace nxm::live2d
+}

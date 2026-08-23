@@ -1,17 +1,3 @@
-/**
- * @file test_live2d_render.cpp
- * @brief The model through the real mesh pipeline, and off the GPU again.
- *
- * Everything else here proves the geometry is right in memory. This one puts it
- * through the shader the engine draws with and reads the pixels back, which is
- * the only claim arithmetic cannot make: that a Cubism model reaches the screen
- * and that driving it changes what is on it.
- *
- * Pages resolve to no texture, so the fragment path returns white and what
- * lands is the vertex colour - a filled silhouette rather than a character.
- * Deliberate: decoding a PNG is the engine's job and this target links no
- * engine.
- */
 
 #include "framework/nxtest.h"
 
@@ -41,9 +27,6 @@ namespace rhi = nxe::rhi;
 
 constexpr u32 TARGET = 256;
 
-/// What the mesh pass pushes, spelled here rather than included: nx_engine owns
-/// MeshPushBlock and this target links no engine. material_words left 0 keeps
-/// the shader off the material buffer this test binds none of.
 struct MeshPush {
   u64 cameras = 0;
   u64 vertices = 0;
@@ -100,8 +83,6 @@ struct TestDevice {
   return n;
 }
 
-/// Pixels the model actually painted. A threshold rather than nonzero: the art
-/// blends over a black clear and its soft edges reach almost none of the way.
 [[nodiscard]] usize painted(const nx::vector<u8> &pixels) noexcept {
   usize n = 0;
   for (usize i = 0; i < nx::cast<usize>(TARGET) * TARGET; ++i)
@@ -110,10 +91,6 @@ struct TestDevice {
   return n;
 }
 
-/// Nearest-subsamples a decoded page down to @p max_side, in place. The
-/// development model's pages are 8192 square - a quarter of a gigabyte each,
-/// which is a great deal of VRAM to ask a test machine for when what is under
-/// test is where a UV lands, not how sharp it is.
 void shrink(rhi::ImageData &image, const u32 max_side) {
   const u32 side = nx::max(image.width, image.height);
   const u32 step = side > max_side ? side / max_side : 1u;
@@ -146,10 +123,6 @@ void shrink(rhi::ImageData &image, const u32 max_side) {
                            .row_pitch = w * 4};
 }
 
-/// Writes the frame out when NX_LIVE2D_DUMP names a directory, so "what did it
-/// actually draw" is answerable without a screen. Off in every ordinary run,
-/// and the only way to check the one thing no assertion here pins: that the
-/// character is the right way up.
 void dump(const u8 *const pixels, const u32 pass) {
   const char *const dir = std::getenv("NX_LIVE2D_DUMP");
   if (dir == nullptr)
@@ -160,7 +133,7 @@ void dump(const u8 *const pixels, const u32 pass) {
                        nx::cast<int>(TARGET) * 4);
 }
 
-} // namespace
+}
 
 TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
           "what is on it") {
@@ -204,7 +177,6 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
   });
   REQUIRE(pipeline.valid());
 
-  // World [0,1]x[0,1] onto the whole target, as the sprite draw test does.
   GpuCamera2D camera = {};
   glm::mat4 proj(1.f);
   proj[0][0] = 2.f;
@@ -213,8 +185,6 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
   proj[3][1] = -1.f;
   camera.view_proj = proj;
 
-  // The model is about one unit across and centred on its own origin, so this
-  // shrinks it a little and moves it into the middle of the unit square.
   ModelView view;
   view.world[0][0] = 0.8f;
   view.world[1][1] = 0.8f;
@@ -239,9 +209,6 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
 
   nx::vector<u8> frames[2];
   for (u32 pass = 0; pass < 2; ++pass) {
-    // A parameter rather than a motion: this model's motions key four small
-    // details and move the mesh by about 0.0004 units, which at this scale is
-    // a tenth of a pixel. Turning the head is a move you can see.
     REQUIRE(animator.set_parameter("ParamAngleX", pass == 0 ? 0.f : 30.f));
     animator.refresh();
 
@@ -304,14 +271,10 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
     device.destroy_buffer(vertices);
   }
 
-  // A character, not a stray triangle and not a full screen: the model in a
-  // square this size covers a decent slice of it and nowhere near all.
   const usize covered = lit(frames[0].data());
   CHECK(covered > (TARGET * TARGET) / 20);
   CHECK(covered < (TARGET * TARGET * 4) / 5);
 
-  // And turning the head moves enough of them that no fixed pose could have
-  // produced both frames.
   CHECK(differing(frames[0].data(), frames[1].data()) > covered / 50);
 
   device.destroy_buffer(cameras);
@@ -322,12 +285,6 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
   nx::vfs::shutdown();
 }
 
-/// The case above draws the model with no pages at all, so it proves the
-/// geometry arrives and nothing about where a UV points. Cubism hands out UVs
-/// with v=0 at the bottom, as OpenGL wants them, and every backend here samples
-/// with v=0 at the top; get that wrong and the model reads the mirror of its
-/// own atlas, which is mostly the empty space between parts. The geometry is
-/// still perfect. It is simply invisible.
 TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
           "the atlas") {
   NX_REQUIRE_FIXTURE();
@@ -451,10 +408,6 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
   push.vertices = device.buffer_address(vertices);
   push.indices = device.buffer_address(indices);
 
-  // Twice over the same draws: once through the pages, once with the page word
-  // knocked out so the fragment path returns white. The second is the model's
-  // silhouette, and the only honest yardstick for how much of the first should
-  // have colour on it.
   enum Pass : u32 { Pages, Silhouette, PassCount };
   nx::vector<u8> frames[PassCount];
 
@@ -504,10 +457,6 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
   const usize art = painted(frames[Pages]);
   REQUIRE(shape > (TARGET * TARGET) / 20);
 
-  // Most of the silhouette, not all of it: the art is not opaque out to its
-  // own mesh edge anywhere, and a page that reads back a little short is a
-  // model with soft edges rather than a model reading the wrong half. Sampling
-  // the mirror of the atlas leaves a fifth of it, which is nowhere near this.
   CHECK(art * 5 > shape * 3);
 
   for (const rhi::TextureHandle page : pages)

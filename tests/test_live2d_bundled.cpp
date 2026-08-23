@@ -1,10 +1,3 @@
-/**
- * @file test_live2d_bundled.cpp
- * @brief The always-on Live2D integration suite, run against the free Hiyori
- * model that ships under the module template. The proprietary-fixture cases in
- * the sibling files assert one development model's exact numbers; these assert
- * only what any Cubism 3+ export must have, so they can run in a plain checkout.
- */
 
 #include "framework/nxtest.h"
 
@@ -32,8 +25,6 @@ struct Mounted {
   Mounted &operator=(const Mounted &) = delete;
 };
 
-/// A distinct non-zero word per page, so a case can see that every texture the
-/// manifest named was offered to the resolver and its answer kept.
 [[nodiscard]] TextureResolver counting(nx::vector<nx::string> &seen) {
   return TextureResolver([&seen](const nx::string_view path) {
     seen.push_back(nx::string(path));
@@ -46,12 +37,8 @@ struct Mounted {
       nx::string(nx::string_view(NX_LIVE2D_BUNDLED_DIR)) + nx::string(MODEL)));
 }
 
-} // namespace
+}
 
-/// The bundled model is staged from the tree, so its absence is a broken build,
-/// not an optional fixture. Skip says so without failing a quick local run;
-/// NX_REQUIRE_MODULE_FIXTURES turns it into a failure so CI cannot go green
-/// having tested nothing.
 #if NX_REQUIRE_MODULE_FIXTURES
 #define REQUIRE_BUNDLED()                                                      \
   do {                                                                         \

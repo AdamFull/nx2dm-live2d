@@ -1,13 +1,3 @@
-/**
- * @file test_live2d_pass.cpp
- * @brief The same masked model, but recorded by the renderer into a graph.
- *
- * test_live2d_clip.cpp records the two passes by hand and proves the masking
- * is right. This proves ModelRenderer does the same thing: the mask atlas is a
- * graph transient here rather than a texture the case owns, and its bindless
- * index is not knowable until the pool hands one over mid-execute - which is
- * the part that cannot be checked by reading the code.
- */
 
 #include "framework/nxtest.h"
 
@@ -71,7 +61,7 @@ struct TestDevice {
   return n;
 }
 
-} // namespace
+}
 
 TEST_CASE("live2d: the renderer draws a masked model through the graph") {
   NX_REQUIRE_FIXTURE();
@@ -159,8 +149,6 @@ TEST_CASE("live2d: the renderer draws a masked model through the graph") {
   const rg::TextureId imported = graph.import(
       nx::id_string::from_literal("live2d target"), target,
       rhi::Extent2D{TARGET, TARGET}, rhi::ResourceState::Undefined);
-  // Cleared by a pass of the case's own, so the renderer's own pass is the one
-  // under test rather than the one that happens to clear.
   graph.add_pass(
       "clear", rg::SetupFn([imported](rg::Builder &builder) {
         builder.color(0, imported, rhi::clear_color(0.f, 0.f, 0.f, 1.f));
@@ -170,8 +158,6 @@ TEST_CASE("live2d: the renderer draws a masked model through the graph") {
   renderer.draw(device, graph, imported, rhi::Format::RGBA8_UNORM,
                 device.buffer_address(cameras), frame);
 
-  // Both of the renderer's passes reached the graph, and the mask atlas it
-  // asked for is a transient the graph owns rather than anything the case made.
   CHECK(graph.pass_count() >= 3u);
 
   graph.compile();
@@ -188,9 +174,6 @@ TEST_CASE("live2d: the renderer draws a masked model through the graph") {
   nx::vector<u8> frame_pixels(
       pixels.data, pixels.data + nx::cast<usize>(TARGET) * TARGET * 4);
 
-  // A model, not a stray triangle and not a full screen. The same bracket the
-  // unmasked readback case uses, so a mask pass that clipped everything away
-  // or nothing at all fails it.
   const usize covered = lit(frame_pixels);
   CHECK(covered > (TARGET * TARGET) / 20);
   CHECK(covered < (TARGET * TARGET * 4) / 5);
@@ -220,8 +203,6 @@ TEST_CASE("live2d: a renderer with nothing to draw records no passes") {
   REQUIRE(graph.init(&device));
   graph.begin_frame();
 
-  // An empty frame costs a graph pass in every project that enables the module
-  // and draws no model, which is most of them until one is placed in a scene.
   const Frame nothing;
   renderer.draw(device, graph, {}, rhi::Format::RGBA8_UNORM, 0, nothing);
   CHECK(graph.pass_count() == 0u);
@@ -270,7 +251,6 @@ TEST_CASE("live2d: the renderer records every mask atlas") {
   });
   renderer.draw(device, graph, target, rhi::Format::RGBA8_UNORM, 0, frame);
 
-  // Two independent clears/draws, then the model pass that samples both.
   CHECK(graph.pass_count() == 3u);
 
   graph.shutdown();

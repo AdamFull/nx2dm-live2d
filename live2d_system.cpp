@@ -16,7 +16,7 @@ constexpr u32 MIN_MASK_RESOLUTION = 64;
 constexpr u32 MAX_MASK_ATLASES = 16;
 constexpr u64 MASK_TEXEL_BYTES = 4;
 
-} // namespace
+}
 
 void Live2DSystem::register_components(scene::registry_t &registry) {
   registry.register_component<Live2DModel>({.name = "Live2DModel"});
@@ -129,8 +129,6 @@ usize Live2DSystem::update(scene::registry_t &registry, const f32 dt) {
     runtime.animator.set_breathing(model.breathe);
     runtime.animator.set_mouth(model.mouth);
     runtime.animator.update(dt * model.time_scale);
-    // After the pose and not before: a mask's tile is fitted to where the
-    // art it clips has just moved to.
     runtime.masks.update(runtime.asset);
     ++stepped;
   });
@@ -154,8 +152,6 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
           return;
 
         ModelView emit_view;
-        // The node's own transform with the component's scale folded in, so a
-        // model sized in scene units does not need its own scale node.
         emit_view.world = node.world;
         emit_view.world[0] *= model.scale;
         emit_view.world[1] *= model.scale;
@@ -164,8 +160,6 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
         emit_view.camera = view.camera;
         emit_view.depth_min = view.depth_min;
         emit_view.depth_max = view.depth_max;
-        // A custom material applies to the whole model: its batch and parameter
-        // offset ride every draw, overriding the per-drawable blend.
         if (view.materials != nullptr && model.material != 0u) {
           emit_view.batch = view.materials->batch_of(model.material);
           emit_view.material = view.materials->offset_of(model.material);
@@ -278,4 +272,4 @@ usize Live2DSystem::on_low_memory(scene::registry_t &registry) {
   return reduced;
 }
 
-} // namespace nxm::live2d
+}

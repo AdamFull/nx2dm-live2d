@@ -1,8 +1,3 @@
-/**
- * @file live2d_module.cpp
- * @brief What tells an Engine about Live2D, and the only file here that knows
- * an Engine exists.
- */
 
 #include "live2d/live2d_platform.h"
 #include "live2d/live2d_scripting.h"
@@ -163,7 +158,7 @@ private:
   Live2DSystem m_system;
 };
 
-} // namespace
-} // namespace nxm::live2d
+}
+}
 
 NX_DECLARE_MODULE(live2d, nxm::live2d::Live2DModule)

@@ -43,7 +43,7 @@ public:
   return name == nullptr || name[0] == '\0';
 }
 
-} // namespace
+}
 
 ModelAsset::~ModelAsset() { reset(); }
 
@@ -73,8 +73,6 @@ ModelAsset &ModelAsset::operator=(ModelAsset &&other) noexcept {
 }
 
 void ModelAsset::reset() noexcept {
-  // The motions and expressions are ours: CubismUserModel::LoadMotion hands
-  // back an instance it does not keep.
   for (const MotionEntry &entry : m_motions)
     csm::ACubismMotion::Delete(entry.motion);
   for (const ExpressionEntry &entry : m_expressions)
@@ -280,8 +278,6 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
     }
   }
 
-  // The manifest's own parameter groups. Both are optional and plenty of
-  // models in the wild have neither, which is why nothing here fails without.
   owner->_eyeBlink = csm::CubismEyeBlink::Create(&settings);
   out.m_eye_blink = owner->_eyeBlink != nullptr;
 
@@ -290,8 +286,6 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
         id != nullptr)
       out.m_lip_sync.push_back(nx::string(id->GetString().GetRawString()));
 
-  // Cubism's own idle sway, on the standard parameters. A model whose rig does
-  // not have them simply ignores the writes.
   owner->_breath = csm::CubismBreath::Create();
   if (owner->_breath != nullptr) {
     csm::csmVector<csm::CubismBreath::BreathParameterData> breath;
@@ -319,4 +313,4 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   return true;
 }
 
-} // namespace nxm::live2d
+}

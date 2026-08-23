@@ -37,7 +37,7 @@ public:
 
 constexpr i32 MOTION_PRIORITY = 2;
 
-} // namespace
+}
 
 bool Animator::play(const nx::string_view group, const i32 index,
                     const bool loop) {
@@ -84,7 +84,6 @@ void Animator::update(const f32 dt) {
   if (owner->_expressionManager != nullptr)
     owner->_expressionManager->UpdateMotion(model, dt);
 
-  // Cubism's order, and each of these writes parameters the next reads.
   if (m_blinking && owner->_eyeBlink != nullptr)
     owner->_eyeBlink->UpdateParameters(model, dt);
   if (m_breathing && owner->_breath != nullptr)
@@ -93,8 +92,6 @@ void Animator::update(const f32 dt) {
   if (owner->_physics != nullptr)
     owner->_physics->Evaluate(model, dt);
 
-  // After physics, as LAppModel does: a mouth is not something inertia should
-  // lag, and a voice that has stopped should close it now rather than settle.
   for (const nx::string &id : m_asset->lip_sync())
     model->SetParameterValue(
         csm::CubismFramework::GetIdManager()->GetId(id.c_str()), m_mouth, 0.8f);
@@ -202,7 +199,6 @@ f32 uv_agreement(const ModelAsset &asset) noexcept {
       var_y += dy * dy;
       var_v += dv * dv;
     }
-    // A drawable with no spread either way says nothing about orientation.
     if (var_y <= 0.0 || var_v <= 0.0)
       continue;
 
@@ -246,4 +242,4 @@ Bounds visible_bounds(const ModelAsset &asset) noexcept {
   return bounds;
 }
 
-} // namespace nxm::live2d
+}

@@ -1,7 +1,3 @@
-/**
- * @file test_live2d_draw.cpp
- * @brief Drawables into the frame's mesh geometry.
- */
 
 #include "framework/nxtest.h"
 
@@ -51,9 +47,6 @@ struct Loaded {
   Loaded &operator=(const Loaded &) = delete;
 };
 
-/// uv_agreement, one layer down: the same correlation between vertex Y and
-/// texture V, but over what the emitter wrote rather than what Cubism holds.
-/// The module's own check cannot see a flip introduced while copying.
 [[nodiscard]] f32 emitted_agreement(const r2d::MeshChannel &channel) {
   f64 weighted = 0.0;
   f64 total = 0.0;
@@ -94,7 +87,7 @@ struct Loaded {
   return total > 0.0 ? nx::cast<f32>(weighted / total) : 0.f;
 }
 
-} // namespace
+}
 
 TEST_CASE("live2d: the emitted geometry keeps Cubism's texture convention") {
   NX_REQUIRE_FIXTURE();
@@ -112,8 +105,6 @@ TEST_CASE("live2d: the view's material rides every emitted draw") {
   Loaded fixture;
   REQUIRE(fixture.ok);
 
-  // The system resolves a component's material to these two numbers; emit_model
-  // is what stamps them onto every draw of the model.
   ModelView view;
   view.batch = 5u;
   view.material = 8u;
@@ -137,15 +128,10 @@ TEST_CASE("live2d: a posed model becomes mesh draws in render order") {
   CHECK(!channel.vertices.empty());
   CHECK(!channel.indices.empty());
 
-  // Fewer draws than drawables: the invisible ones are dropped rather than
-  // appended empty.
   CHECK(draws <= fixture.asset.drawable_count());
 
   for (const r2d::MeshDraw &draw : channel.draws) {
     CHECK(draw.index_count > 0u);
-    // Every index is inside its own draw's vertices. The mesh shader adds
-    // vertex_offset itself, so an index that reached beyond the drawable would
-    // read another one's geometry rather than crash.
     CHECK(draw.first_index + draw.index_count <= channel.indices.size());
     CHECK(draw.vertex_offset <= channel.vertices.size());
     for (u32 i = 0; i < draw.index_count; ++i) {
@@ -154,9 +140,6 @@ TEST_CASE("live2d: a posed model becomes mesh draws in render order") {
     }
   }
 
-  // One key for the whole model: the drawables' order among themselves is the
-  // model's, and MeshChannel's sort is stable so appending them in render
-  // order is what keeps it.
   const u32 key = channel.draws[0].sort_key;
   for (const r2d::MeshDraw &draw : channel.draws)
     CHECK(draw.sort_key == key);
@@ -171,9 +154,6 @@ TEST_CASE("live2d: the texture a drawable names is the one the manifest "
   r2d::MeshChannel channel;
   REQUIRE(emit_model(fixture.asset, {}, channel) > 0u);
 
-  // The resolver answered PAGE for every page, and that is what has to arrive
-  // in the draw - not NX_TEXTURE_NONE, which the shader treats as untextured
-  // and which is what a lost or misindexed answer looks like.
   for (const r2d::MeshDraw &draw : channel.draws) {
     CHECK((draw.texture >> 16) == PAGE);
     CHECK((draw.texture >> 16) != NX_TEXTURE_NONE);
@@ -226,7 +206,6 @@ TEST_CASE("live2d: opacity and tint reach the vertex colour") {
     CHECK(now <= was);
     dimmed += now < was ? 1u : 0u;
   }
-  // Not merely "no brighter": most of the model has to have actually faded.
   CHECK(dimmed > faded.vertices.size() / 2u);
 }
 
@@ -243,9 +222,6 @@ TEST_CASE("live2d: the drawables this path cannot clip are counted") {
   Loaded fixture;
   REQUIRE(fixture.ok);
 
-  // Not a pass/fail on the number: what matters is that the shortfall is
-  // measured rather than silent. A model with masks drawn without them is a
-  // visible defect, and this is the number that says how much of one.
   const usize masked = masked_drawable_count(fixture.asset);
   CHECK(masked <= fixture.asset.drawable_count());
   nx::logi("live2d: {} of {} visible drawables would be clipped", masked,

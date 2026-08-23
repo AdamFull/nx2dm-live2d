@@ -1,7 +1,3 @@
-/**
- * @file test_live2d_assets.cpp
- * @brief Reading a .model3.json and everything it names.
- */
 
 #include "framework/nxtest.h"
 
@@ -16,8 +12,6 @@ namespace {
 using namespace nxm::live2d;
 using namespace nxm::live2d_test;
 
-/// Mounts the fixture directory at the VFS root for one case, and takes it back
-/// down however the case leaves.
 struct Mounted {
   bool ok = false;
 
@@ -33,8 +27,6 @@ struct Mounted {
   Mounted &operator=(const Mounted &) = delete;
 };
 
-/// Hands back a distinct index per path, so a case can tell the pages apart
-/// and see that the order the manifest listed them in survived.
 [[nodiscard]] TextureResolver counting(nx::vector<nx::string> &seen) {
   return TextureResolver([&seen](const nx::string_view path) {
     seen.push_back(nx::string(path));
@@ -42,7 +34,7 @@ struct Mounted {
   });
 }
 
-} // namespace
+}
 
 TEST_CASE("live2d: a model3.json brings its moc, textures and motions") {
   NX_REQUIRE_FIXTURE();
@@ -56,14 +48,10 @@ TEST_CASE("live2d: a model3.json brings its moc, textures and motions") {
   CHECK(error.empty());
   REQUIRE(asset.valid());
 
-  // A model at all: a moc that produced parameters, parts and drawables.
   CHECK(asset.parameter_count() > 0u);
   CHECK(asset.part_count() > 0u);
   CHECK(asset.drawable_count() > 0u);
 
-  // Every texture the manifest listed was offered to the resolver, in order,
-  // and the answer was kept - a drawable's texture index means an index into
-  // exactly this.
   REQUIRE(asset.textures().size() == pages.size());
   REQUIRE(!pages.empty());
   for (usize i = 0; i < pages.size(); ++i) {
@@ -85,9 +73,6 @@ TEST_CASE("live2d: the canvas the moc declares is a real size") {
   nx::string error;
   REQUIRE(load_model(MODEL, {}, asset, error));
 
-  // Absolute, not a comparison against another load. This is what L2's
-  // deformation is checked to stay inside, so a zero or a mirrored canvas here
-  // would make that check vacuous rather than failing it.
   const CanvasInfo canvas = asset.canvas();
   CHECK(canvas.width > 0.f);
   CHECK(canvas.height > 0.f);
@@ -101,10 +86,6 @@ TEST_CASE("live2d: a manifest naming a file that is not there still loads") {
   Mounted mount;
   REQUIRE(mount.ok);
 
-  // Built rather than borrowed. The development model happens to list two
-  // expressions it does not ship, but a case that relies on that passes
-  // vacuously against a clean export - so the broken manifest is made here and
-  // overlaid on the real moc, which falls through to the host mount beneath.
   nx::vfs::MemoryDevice *const overlay = nx::vfs::make_memory_device();
   REQUIRE(overlay != nullptr);
   const nx::string_view manifest = R"({
@@ -128,7 +109,6 @@ TEST_CASE("live2d: a manifest naming a file that is not there still loads") {
   CHECK(broken.valid());
   CHECK(broken.drawable_count() > 0u);
 
-  // Every one of the three was named, and none of them stopped the moc.
   CHECK(broken.missing().size() == 3u);
   CHECK(broken.expressions().empty());
   CHECK(broken.motions().empty());
@@ -182,8 +162,6 @@ TEST_CASE("live2d: loading twice into one asset releases the first") {
   const usize drawables = asset.drawable_count();
   const usize motions = asset.motions().size();
 
-  // The motions and expressions are the asset's to delete, and a second load
-  // over the top is where they would leak or be deleted twice.
   REQUIRE(load_model(MODEL, {}, asset, error));
   CHECK(asset.drawable_count() == drawables);
   CHECK(asset.motions().size() == motions);

@@ -1,7 +1,3 @@
-/**
- * @file live2d_renderer.cpp
- * @brief The backend seam Cubism leaves open, and nothing behind it yet.
- */
 
 #include "core/foundation/diagnostics/log.h"
 
@@ -19,4 +15,4 @@ CubismRenderer *CubismRenderer::Create(const csmUint32 width,
 
 void CubismRenderer::StaticRelease() {}
 
-} // namespace Live2D::Cubism::Framework::Rendering
+}

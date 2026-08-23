@@ -27,7 +27,7 @@ namespace sys = nxe::sys;
   return ctx.scene().registry().try_get<Live2DModel>(e);
 }
 
-} // namespace
+}
 
 void expose_live2d_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
   host.expose_as("live2d_play", [&ctx](const sys::Entity e,
@@ -46,8 +46,6 @@ void expose_live2d_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
 
   host.expose_as("live2d_finished", [&ctx](const sys::Entity e) {
     const Live2DRuntime *const runtime = runtime_of(ctx, e);
-    // No model is not "still playing": a script waiting on this would wait for
-    // ever rather than move on.
     return runtime == nullptr || runtime->animator.motion_finished();
   });
 
@@ -64,8 +62,6 @@ void expose_live2d_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
         return runtime == nullptr ? 0.f : runtime->animator.parameter(id);
       });
 
-  // On the component rather than the runtime: these survive a save, and a
-  // model that has not loaded yet should still remember what it was told.
   host.expose_as("live2d_visible",
                  [&ctx](const sys::Entity e, const bool on) {
                    Live2DModel *const model = model_of(ctx, e);
@@ -80,8 +76,6 @@ void expose_live2d_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
                    Live2DModel *const model = model_of(ctx, e);
                    if (model == nullptr)
                      return false;
-                   // Hand-driving the mouth means nothing else should: a voice
-                   // still bound would overwrite this on the very next frame.
                    model->voice = 0;
                    model->mouth = nx::clamp(open, 0.f, 1.f);
                    return true;
@@ -111,4 +105,4 @@ usize drive_lip_sync(nxe::ModuleContext &ctx, Live2DSystem &system) {
       }));
 }
 
-} // namespace nxm::live2d
+}

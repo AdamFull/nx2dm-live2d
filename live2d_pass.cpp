@@ -40,7 +40,7 @@ void put_affine(PushBlock &push, const glm::mat3 &m) noexcept {
   return v;
 }
 
-} // namespace
+}
 
 bool ModelRenderer::init(rhi::Device &device, const rhi::ShaderHandle shader,
                          const u32 sampler) {
@@ -81,8 +81,6 @@ bool ModelRenderer::ensure_pipelines(rhi::Device &device,
   if (format == m_format && m_mask_pipeline.valid())
     return true;
 
-  // The scene target's format is not known until the first frame, and can
-  // change when the swapchain does. Rebuilding is rare enough to be simple.
   for (rhi::PipelineHandle &pipeline : m_model_pipeline) {
     if (pipeline.valid())
       device.destroy_pipeline(pipeline);
@@ -211,8 +209,6 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
       rg::ExecuteFn([this, &device, &frame, atlases, cameras, vertices,
                      indices](rhi::CommandContext &cmd,
                               const rg::Resources &resources) {
-        // Atlases are transient, so they have no handles - and therefore no
-        // bindless indices - until the pool hands them over, which is now.
         nx::small_vector<u32, 16> mask_textures;
         mask_textures.reserve(atlases.size());
         for (const rg::TextureId atlas : atlases)
@@ -252,4 +248,4 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
       }));
 }
 
-} // namespace nxm::live2d
+}

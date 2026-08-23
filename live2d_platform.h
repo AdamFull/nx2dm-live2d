@@ -1,11 +1,5 @@
 #pragma once
 
-/**
- * @file live2d_platform.h
- * @brief Bringing the Cubism SDK up on this engine's terms
- * (namespace nxm::live2d).
- */
-
 #include "core/foundation/strings/utf8_string.h"
 
 namespace nxm::live2d {
@@ -28,4 +22,4 @@ struct CoreVersion {
 
 void uninstall_platform();
 
-} // namespace nxm::live2d
+}

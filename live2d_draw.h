@@ -1,10 +1,5 @@
 #pragma once
 
-/**
- * @file live2d_draw.h
- * @brief A posed model into the frame's mesh geometry (namespace nxm::live2d).
- */
-
 #include "core/rendering/render2d/mesh_channel.h"
 #include "live2d/live2d_assets.h"
 #include "live2d/live2d_mask.h"
@@ -48,7 +43,6 @@ struct ModelView {
 usize emit_model(const ModelAsset &asset, const ModelView &view,
                  nxe::r2d::MeshChannel &out);
 
-/// How one emitted draw is clipped. One per draw appended, in the same order.
 struct DrawMask {
   i32 group = -1;
   u32 atlas = 0;
@@ -59,13 +53,10 @@ struct DrawMask {
   [[nodiscard]] bool clipped() const noexcept { return group >= 0; }
 };
 
-/// As above, and additionally fills @p out_masks with one entry per appended
-/// draw, so a pass that can clip knows which of them to and how.
 usize emit_model(const ModelAsset &asset, const ModelView &view,
                  const MaskLayout &masks, nxe::r2d::MeshChannel &out,
                  nx::vector<DrawMask> &out_masks, u32 atlas_base = 0);
 
-/// One mask group's geometry, in model space, to be drawn into the atlas.
 struct MaskDraw {
   u32 first_index = 0;
   u32 index_count = 0;
@@ -90,11 +81,9 @@ struct MaskChannel {
   }
 };
 
-/// Appends the shapes making up each of @p masks' groups. Model space, because
-/// a mask is drawn into its own tile and never through a camera.
 usize emit_masks(const ModelAsset &asset, const MaskLayout &masks,
                  MaskChannel &out, u32 atlas_base = 0);
 
 [[nodiscard]] usize masked_drawable_count(const ModelAsset &asset) noexcept;
 
-} // namespace nxm::live2d
+}

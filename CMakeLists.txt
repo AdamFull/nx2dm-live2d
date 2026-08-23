@@ -1,12 +1,3 @@
-# The Live2D Cubism runtime, as a module. See docs/live2d.md.
-#
-# Two targets, as Spine has. nx_live2d is the runtime and links no engine and no
-# RHI, so loading and deforming a model is testable headless; nx_module_live2d
-# is the handful of lines that tell an Engine about it.
-#
-# The option is declared here rather than left to nx_module() because the SDK
-# has to be found before the module can link it, and a build without one should
-# say so rather than fail in the linker.
 
 option(NX_MODULE_LIVE2D "Build the Live2D Cubism integration" OFF)
 if (NOT NX_MODULE_LIVE2D)
@@ -27,18 +18,12 @@ add_library(nx::live2d ALIAS nx_live2d)
 target_include_directories(nx_live2d PUBLIC "${CMAKE_SOURCE_DIR}/engine"
         "${CMAKE_SOURCE_DIR}/modules")
 
-# render2d for the packed bindless word a texture resolves to, and the mesh
-# channel L3 emits into. No RHI and no engine: a model is geometry until
-# something draws it.
 target_link_libraries(nx_live2d
         PUBLIC nx::foundation nx::render2d nx::live2d_framework
         PRIVATE nx::compile_options)
 
 set_target_properties(nx_live2d PROPERTIES FOLDER "modules")
 
-# The pass, which needs a device and the render graph and so cannot live in
-# nx_live2d - keeping that one free of the RHI is what lets every loading,
-# deforming and layout case run headless.
 add_library(nx_live2d_render STATIC live2d_pass.cpp live2d_pass.h
         live2d_system.cpp live2d_system.h)
 add_library(nx::live2d_render ALIAS nx_live2d_render)

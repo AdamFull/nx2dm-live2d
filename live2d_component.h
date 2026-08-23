@@ -1,11 +1,5 @@
 #pragma once
 
-/**
- * @file live2d_component.h
- * @brief A model placed in a scene, and the pose it holds
- * (namespace nxm::live2d).
- */
-
 #include "core/scene/components.h"
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_mask.h"
@@ -14,8 +8,6 @@
 
 namespace nxm::live2d {
 
-/// What a scene authors. Everything here survives a save and a load; nothing
-/// here is a pointer into something loaded.
 struct Live2DModel {
   nx::string model;
   glm::vec4 color{1.f, 1.f, 1.f, 1.f};
@@ -39,8 +31,6 @@ struct Live2DRuntime {
   ModelAsset asset;
   Animator animator;
   MaskLayout masks;
-  /// The last path attempted. Kept separate from loaded so a failed request
-  /// can retry without pretending it succeeded.
   nx::string requested;
   nx::string loaded;
   f32 retry_in = 0.f;
@@ -79,4 +69,4 @@ struct Live2DRuntime {
   [[nodiscard]] bool ready() const noexcept { return asset.valid(); }
 };
 
-} // namespace nxm::live2d
+}

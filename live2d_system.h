@@ -1,10 +1,5 @@
 #pragma once
 
-/**
- * @file live2d_system.h
- * @brief Posing a scene's models and drawing them (namespace nxm::live2d).
- */
-
 #include "live2d/live2d_component.h"
 #include "live2d/live2d_pass.h"
 
@@ -39,8 +34,6 @@ public:
   void set_mask_limits(u32 max_resolution, u64 bytes,
                        u32 atlas_count = 16) noexcept;
 
-  /// Reduces mask resolution and future transient budgets, then rebuilds live
-  /// layouts at the smaller size. Returns the layouts actually reduced.
   usize on_low_memory(nxe::scene::registry_t &registry);
 
   [[nodiscard]] u32 mask_resolution_limit() const noexcept {
@@ -68,4 +61,4 @@ private:
   bool m_budget_warned = false;
 };
 
-} // namespace nxm::live2d
+}

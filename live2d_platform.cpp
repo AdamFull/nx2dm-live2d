@@ -1,8 +1,3 @@
-/**
- * @file live2d_platform.cpp
- * @brief The three seams Cubism leaves for a host: allocation, logging and
- * startup.
- */
 
 #include "live2d/live2d_platform.h"
 
@@ -43,7 +38,7 @@ Allocator &allocator() {
 
 bool g_started = false;
 
-} // namespace
+}
 
 CoreVersion core_version() noexcept {
   const u32 packed = nx::cast<u32>(core::csmGetVersion());
@@ -84,4 +79,4 @@ void uninstall_platform() {
   g_started = false;
 }
 
-} // namespace nxm::live2d
+}

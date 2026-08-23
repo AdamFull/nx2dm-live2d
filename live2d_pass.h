@@ -1,18 +1,11 @@
 #pragma once
 
-/**
- * @file live2d_pass.h
- * @brief Live2D's two passes, recorded into the frame (namespace nxm::live2d).
- */
-
 #include "core/rendering/graph/render_graph.h"
 #include "core/rendering/rhi/upload_ring.h"
 #include "live2d/live2d_draw.h"
 
 namespace nxm::live2d {
 
-/// One frame's worth of Live2D, as the simulation hands it to the renderer.
-/// Every model that drew this frame is already flattened into it.
 struct Frame {
   nxe::r2d::MeshChannel geometry;
   nx::vector<DrawMask> clips;
@@ -29,8 +22,6 @@ struct Frame {
   }
 };
 
-/// What the shader is pushed. Mirrors Live2DPush in shaders/live2d.slang:
-/// vectors, then pointers, then scalars, so neither side has padding to guess.
 struct PushBlock {
   glm::vec4 mask_row0{0.f};
   glm::vec4 mask_row1{0.f};
@@ -88,4 +79,4 @@ private:
   u32 m_sampler = 0;
 };
 
-} // namespace nxm::live2d
+}
