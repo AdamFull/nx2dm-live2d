@@ -1,8 +1,0 @@
-{
-  "name": "{{project}}",
-  "package": "{{package}}",
-  "assets": "assets",
-  "androidAssetGenerator": "cmake/GenerateLuauAssets.cmake",
-  "generatedAssets": ["scripts/host_api.luau", "scripts/host_modules.luau"],
-  "modules": ["live2d"]
-}
