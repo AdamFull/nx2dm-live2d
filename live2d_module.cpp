@@ -16,6 +16,7 @@ constexpr nx::string_view DRAW_PASS = "live2d.draw";
 constexpr nx::string_view LOAD_SYSTEM = "live2d.load";
 constexpr nx::string_view UPDATE_SYSTEM = "live2d.update";
 constexpr nx::string_view EMIT_SYSTEM = "live2d.emit";
+constexpr nx::string_view MODULE_SLOT = "live2d";
 constexpr nx::string_view WORLD_SLOT = "world";
 constexpr nx::string_view SHADER = "live2d/live2d";
 constexpr nxe::ModuleService PROVIDED_SERVICES[] = {
@@ -128,9 +129,10 @@ public:
         }));
 
     static constexpr nx::string_view MINE[] = {DRAW_PASS};
-    if (!ctx.fill_pass_slot(WORLD_SLOT, MINE, name()))
-      nx::logw("live2d: nothing to fill; the frame has no '{}' slot",
-               WORLD_SLOT);
+    const nx::string_view slot =
+        ctx.has_pass_slot(MODULE_SLOT) ? MODULE_SLOT : WORLD_SLOT;
+    if (!ctx.fill_pass_slot(slot, MINE, name()))
+      nx::logw("live2d: nothing to fill; the frame has no '{}' slot", slot);
 
     nx::logi("live2d: attached");
     return true;

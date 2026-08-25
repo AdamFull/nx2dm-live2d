@@ -24,18 +24,19 @@ void configure(nxe::EngineConfig &config) {
 }
 
 void add_model(nxe::Engine &engine) {
-    const nxe::scene::Entity e = engine.scene().create_node("model");
-    engine.scene().set_position(e, {0.f, -2.4f});
+  const nxe::scene::Entity e = engine.scene().create_node("model");
+  engine.scene().set_position(e, {0.f, -2.4f});
 
-    nxm::live2d::Live2DModel model;
-    model.model = "/live2d/Hiyori.model3.json";
-    model.scale = 2.4f;
-    model.motion = "Idle";
-    model.motion_index = 0;
-    model.motion_loop = true;
-    model.blink = true;
-    model.breathe = true;
-    engine.scene().registry().emplace<nxm::live2d::Live2DModel>(e, std::move(model));
+  nxm::live2d::Live2DModel model;
+  model.model = "/live2d/Hiyori.model3.json";
+  model.scale = 2.4f;
+  model.motion = "Idle";
+  model.motion_index = 0;
+  model.motion_loop = true;
+  model.blink = true;
+  model.breathe = true;
+  engine.scene().registry().emplace<nxm::live2d::Live2DModel>(e,
+                                                              std::move(model));
 }
 
 bool on_create(nxe::Engine &engine) {
@@ -45,16 +46,17 @@ bool on_create(nxe::Engine &engine) {
   engine.scene().set_active_camera(camera);
 
   add_model(engine);
-  if (nxe::start_scripts(
-          engine, {.backend = nxe::script::luau_backend(),
-                   .expose_game = {},
-                   .load_module = &nxe::script::load_luau_module}))
+  if (nxe::start_scripts(engine,
+                         {.backend = nxe::script::luau_backend(),
+                          .expose_game = {},
+                          .load_module = &nxe::script::load_luau_module}))
     (void)engine.scripts().define(engine.schedule(), "model", "game.model");
 
   nx::logi("{{project}}: up");
   return true;
 }
 
-}
+} // namespace
 
-NX_IMPLEMENT_GAME(.configure = configure, .on_create = on_create)
+NX_IMPLEMENT_GAME(.configure = configure, .on_create = on_create,
+                  .on_suspend = {}, .on_low_memory = {}, .on_destroy = {})

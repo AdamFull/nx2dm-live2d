@@ -1,9 +1,11 @@
 #include "live2d/live2d_assets.h"
 
+#include "live2d/live2d_asset_bundle.h"
 #include "live2d/live2d_platform.h"
 
 #include "core/foundation/diagnostics/log.h"
 #include "core/foundation/platform/filesystem.h"
+#include "core/foundation/serialization/asset_policy.h"
 #include "core/foundation/strings/format.h"
 #include "core/foundation/vfs/vfs.h"
 #include "core/rendering/render2d/render_interop.h"
@@ -43,7 +45,39 @@ public:
   return name == nullptr || name[0] == '\0';
 }
 
+[[nodiscard]] bool ends_with(const nx::string_view value,
+                             const nx::string_view suffix) noexcept {
+  return value.size() >= suffix.size() &&
+         value.substr(value.size() - suffix.size()) == suffix;
 }
+
+struct LoadedResource {
+  nx::blob<u8> storage;
+  std::span<const u8> bytes;
+
+  [[nodiscard]] explicit operator bool() const noexcept {
+    return !bytes.empty();
+  }
+};
+
+[[nodiscard]] LoadedResource read_resource(const ModelBundleView *const bundle,
+                                           const nx::string_view model_path,
+                                           const nx::string_view name) {
+  if (!nx::resource_bundle::valid_name(name))
+    return {};
+  if (bundle != nullptr)
+    return {.storage = {}, .bytes = bundle->resources.find(name)};
+  const nx::string path = beside(model_path, name);
+  auto bytes = nx::vfs::read(path.view());
+  if (!bytes || bytes->empty() || bytes->size() > MAX_LIVE2D_RESOURCE_BYTES)
+    return {};
+  LoadedResource out;
+  out.storage = std::move(bytes.value());
+  out.bytes = {out.storage.data(), out.storage.size()};
+  return out;
+}
+
+} // namespace
 
 ModelAsset::~ModelAsset() { reset(); }
 
@@ -143,30 +177,77 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   out.reset();
   error.clear();
 
-  const auto manifest = nx::vfs::read(model3_path);
-  if (!manifest) {
-    error = nx::format("no model at '{}'", model3_path);
-    return false;
+  nx::blob<u8> cooked_storage;
+  nx::blob<u8> authored_storage;
+  std::optional<ModelBundleView> bundle;
+  std::span<const u8> manifest;
+  const bool explicit_cooked = ends_with(model3_path, ".nxb");
+  const nx::string authored_path =
+      explicit_cooked
+          ? nx::string(model3_path.substr(0, model3_path.size() - 4))
+          : nx::string(model3_path);
+  nx::string cooked_path(model3_path);
+  if (!explicit_cooked)
+    cooked_path += ".nxb";
+  const nx::vfs::FileInfo cooked_info = nx::vfs::stat(cooked_path.view());
+  if (cooked_info.exists) {
+    if (cooked_info.is_directory ||
+        cooked_info.size > MAX_LIVE2D_BUNDLE_BYTES) {
+      error =
+          nx::format("cooked model '{}' exceeds its size limit", cooked_path);
+      return false;
+    }
+    auto bytes = nx::vfs::read(cooked_path.view());
+    if (bytes)
+      cooked_storage = std::move(bytes.value());
+    bundle = open_model_bundle({cooked_storage.data(), cooked_storage.size()});
+    if (!bundle) {
+      error = nx::format("cooked model '{}' is malformed", cooked_path);
+      return false;
+    }
+    manifest = bundle->model_json();
+  } else {
+    if (explicit_cooked || !nx::asset_policy::can_fallback_to_authored_source(
+                               cooked_info.exists)) {
+      error = nx::format("no cooked model at '{}'", cooked_path);
+      return false;
+    }
+    auto bytes = nx::vfs::read(authored_path.view());
+    if (!bytes || bytes->empty() || bytes->size() > MAX_LIVE2D_MANIFEST_BYTES) {
+      error = nx::format("no bounded model at '{}'", authored_path);
+      return false;
+    }
+    authored_storage = std::move(bytes.value());
+    manifest = {authored_storage.data(), authored_storage.size()};
+    ModelManifest validated;
+    if (!parse_model_manifest(
+            nx::string_view(reinterpret_cast<const char *>(manifest.data()),
+                            manifest.size()),
+            validated, error)) {
+      error = nx::format("{}: {}", authored_path, error);
+      return false;
+    }
   }
 
   csm::CubismModelSettingJson settings(
-      const_cast<csm::csmByte *>(manifest->data()),
-      nx::cast<csm::csmSizeInt>(manifest->size()));
+      const_cast<csm::csmByte *>(manifest.data()),
+      nx::cast<csm::csmSizeInt>(manifest.size()));
 
   const char *const moc_name = settings.GetModelFileName();
   if (empty_name(moc_name)) {
-    error = nx::format("{}: names no .moc3", model3_path);
+    error = nx::format("{}: names no .moc3", authored_path);
     return false;
   }
-  const nx::string moc_path = beside(model3_path, moc_name);
-  const auto moc = nx::vfs::read(moc_path);
+  const nx::string moc_path = beside(authored_path.view(), moc_name);
+  const LoadedResource moc = read_resource(bundle ? &bundle.value() : nullptr,
+                                           authored_path.view(), moc_name);
   if (!moc) {
     error = nx::format("no moc at '{}'", moc_path);
     return false;
   }
 
-  const u32 version = nx::cast<u32>(
-      core::csmGetMocVersion(moc->data(), nx::cast<unsigned int>(moc->size())));
+  const u32 version = nx::cast<u32>(core::csmGetMocVersion(
+      moc.bytes.data(), nx::cast<unsigned int>(moc.bytes.size())));
   if (version == 0 || version > latest_moc_version()) {
     error = nx::format("{}: moc3 format {} and this Core reads up to {}",
                        moc_path, version, latest_moc_version());
@@ -174,7 +255,8 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   }
 
   auto *const owner = CSM_NEW HostedModel();
-  owner->LoadModel(moc->data(), nx::cast<csm::csmSizeInt>(moc->size()), true);
+  owner->LoadModel(moc.bytes.data(),
+                   nx::cast<csm::csmSizeInt>(moc.bytes.size()), true);
   if (owner->GetModel() == nullptr) {
     CSM_DELETE(owner);
     error = nx::format("{}: Core refused the moc", moc_path);
@@ -194,11 +276,13 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
 
   const auto read_optional = [&](const nx::string_view name,
                                  nx::string &path_out) {
-    path_out = beside(model3_path, name);
-    auto bytes = nx::vfs::read(path_out);
+    path_out = beside(authored_path.view(), name);
+    LoadedResource bytes = read_resource(bundle ? &bundle.value() : nullptr,
+                                         authored_path.view(), name);
     if (!bytes) {
       out.m_missing.push_back(path_out);
-      nx::logw("live2d: {} names '{}', which is not there", model3_path, name);
+      nx::logw("live2d: {} names '{}', which is not there", authored_path,
+               name);
     }
     return bytes;
   };
@@ -210,7 +294,7 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
       out.m_textures.push_back(pack_texture(NX_TEXTURE_NONE, 0));
       continue;
     }
-    const nx::string path = beside(model3_path, name);
+    const nx::string path = beside(authored_path.view(), name);
     const u32 packed =
         resolve ? resolve(path) : pack_texture(NX_TEXTURE_NONE, 0);
     if ((packed >> 16) == NX_TEXTURE_NONE)
@@ -222,21 +306,22 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   nx::string path;
   if (const char *const name = settings.GetPhysicsFileName(); !empty_name(name))
     if (const auto bytes = read_optional(name, path)) {
-      owner->LoadPhysics(bytes->data(),
-                         nx::cast<csm::csmSizeInt>(bytes->size()));
+      owner->LoadPhysics(bytes.bytes.data(),
+                         nx::cast<csm::csmSizeInt>(bytes.bytes.size()));
       out.m_physics = owner->_physics != nullptr;
     }
 
   if (const char *const name = settings.GetPoseFileName(); !empty_name(name))
     if (const auto bytes = read_optional(name, path)) {
-      owner->LoadPose(bytes->data(), nx::cast<csm::csmSizeInt>(bytes->size()));
+      owner->LoadPose(bytes.bytes.data(),
+                      nx::cast<csm::csmSizeInt>(bytes.bytes.size()));
       out.m_pose = owner->_pose != nullptr;
     }
 
   if (const char *const name = settings.GetUserDataFile(); !empty_name(name))
     if (const auto bytes = read_optional(name, path))
-      owner->LoadUserData(bytes->data(),
-                          nx::cast<csm::csmSizeInt>(bytes->size()));
+      owner->LoadUserData(bytes.bytes.data(),
+                          nx::cast<csm::csmSizeInt>(bytes.bytes.size()));
 
   for (i32 i = 0; i < settings.GetExpressionCount(); ++i) {
     const char *const file = settings.GetExpressionFileName(i);
@@ -247,7 +332,8 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
       continue;
     const char *const name = settings.GetExpressionName(i);
     csm::ACubismMotion *const motion = owner->LoadExpression(
-        bytes->data(), nx::cast<csm::csmSizeInt>(bytes->size()), name);
+        bytes.bytes.data(), nx::cast<csm::csmSizeInt>(bytes.bytes.size()),
+        name);
     if (motion != nullptr)
       out.m_expressions.push_back({nx::string(name), motion});
   }
@@ -264,8 +350,8 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
 
       const nx::string name = nx::format("{}_{}", group, i);
       csm::ACubismMotion *const motion = owner->LoadMotion(
-          bytes->data(), nx::cast<csm::csmSizeInt>(bytes->size()), name.c_str(),
-          nullptr, nullptr, &settings, group, i);
+          bytes.bytes.data(), nx::cast<csm::csmSizeInt>(bytes.bytes.size()),
+          name.c_str(), nullptr, nullptr, &settings, group, i);
       if (motion == nullptr)
         continue;
       const f32 fade_in = settings.GetMotionFadeInTimeValue(group, i);
@@ -303,14 +389,14 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   owner->IsInitialized(true);
   nx::logi("live2d: '{}' - {} parameters, {} parts, {} drawables, {} motions, "
            "{} expressions{}{}",
-           model3_path, out.parameter_count(), out.part_count(),
+           authored_path, out.parameter_count(), out.part_count(),
            out.drawable_count(), out.motions().size(), out.expressions().size(),
            out.has_physics() ? ", physics" : "",
            out.has_pose() ? ", pose" : "");
   if (!out.m_missing.empty())
-    nx::logw("live2d: '{}' names {} file(s) that are not there", model3_path,
+    nx::logw("live2d: '{}' names {} file(s) that are not there", authored_path,
              out.m_missing.size());
   return true;
 }
 
-}
+} // namespace nxm::live2d

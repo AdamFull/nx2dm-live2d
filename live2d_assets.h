@@ -9,7 +9,7 @@ namespace Live2D::Cubism::Framework {
 class CubismModel;
 class CubismUserModel;
 class ACubismMotion;
-}
+} // namespace Live2D::Cubism::Framework
 
 namespace nxm::live2d {
 
@@ -117,8 +117,11 @@ private:
   bool m_eye_blink = false;
 };
 
+/// Loads an authored .model3.json tree in development and its atomic
+/// .model3.json.nxb bundle in Shipping. Textures remain independently cooked
+/// texture assets; every other runtime subresource is embedded in the model.
 [[nodiscard]] bool load_model(nx::string_view model3_path,
                               TextureResolver resolve, ModelAsset &out,
                               nx::string &error);
 
-}
+} // namespace nxm::live2d
