@@ -22,8 +22,8 @@ set(NX_LIVE2D_SOURCES live2d_animator.cpp live2d_assets.cpp live2d_draw.cpp
 add_library(nx_live2d STATIC ${NX_LIVE2D_SOURCES} ${NX_LIVE2D_HEADERS})
 add_library(nx::live2d ALIAS nx_live2d)
 
-target_include_directories(nx_live2d PUBLIC "${CMAKE_SOURCE_DIR}/engine"
-        "${CMAKE_SOURCE_DIR}/modules")
+target_include_directories(nx_live2d PUBLIC "${NX_ENGINE_ROOT}/engine"
+        "${NX_ENGINE_ROOT}/modules")
 
 target_link_libraries(nx_live2d
         PUBLIC nx::foundation nx::render2d nx::live2d_framework
@@ -35,8 +35,8 @@ add_library(nx_live2d_render STATIC live2d_pass.cpp live2d_pass.h
         live2d_system.cpp live2d_system.h)
 add_library(nx::live2d_render ALIAS nx_live2d_render)
 
-target_include_directories(nx_live2d_render PUBLIC "${CMAKE_SOURCE_DIR}/engine"
-        "${CMAKE_SOURCE_DIR}/modules")
+target_include_directories(nx_live2d_render PUBLIC "${NX_ENGINE_ROOT}/engine"
+        "${NX_ENGINE_ROOT}/modules")
 
 target_link_libraries(nx_live2d_render
         PUBLIC nx::live2d nx::rhi nx::render_graph

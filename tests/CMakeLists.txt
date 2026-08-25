@@ -66,7 +66,7 @@ if (TARGET assetc AND NOT ANDROID AND NOT IOS)
             ../live2d_assets.cpp ../live2d_asset_bundle.cpp
             ../live2d_platform.cpp ../live2d_renderer.cpp)
     target_include_directories(nx_live2d_shipping_asset_tests PRIVATE
-            "${CMAKE_SOURCE_DIR}/engine" "${CMAKE_SOURCE_DIR}/modules")
+            "${NX_ENGINE_ROOT}/engine" "${NX_ENGINE_ROOT}/modules")
     target_link_libraries(nx_live2d_shipping_asset_tests
             PRIVATE nx::test nx::foundation nx::render2d
             nx::live2d_framework nx::compile_options)
