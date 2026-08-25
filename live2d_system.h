@@ -7,6 +7,10 @@ namespace nxe::r2d {
 class MaterialSystem;
 }
 
+namespace nxe::scene {
+class AssetRegistry;
+}
+
 namespace nxm::live2d {
 
 inline constexpr nx::string_view SERVICE = "live2d.animation";
@@ -24,6 +28,8 @@ public:
 
   usize load_pending(nxe::scene::registry_t &registry, f32 dt = 0.f);
 
+  usize update(nxe::scene::registry_t &registry,
+               const nxe::scene::AssetRegistry &assets, f32 dt);
   usize update(nxe::scene::registry_t &registry, f32 dt);
 
   usize emit(nxe::scene::registry_t &registry, Frame &out,

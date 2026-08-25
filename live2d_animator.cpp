@@ -40,7 +40,7 @@ constexpr i32 MOTION_PRIORITY = 2;
 }
 
 bool Animator::play(const nx::string_view group, const i32 index,
-                    const bool loop) {
+                    const bool loop, const f32 fade_seconds) {
   Exposed *const owner = reach(m_asset);
   if (owner == nullptr)
     return false;
@@ -51,8 +51,23 @@ bool Animator::play(const nx::string_view group, const i32 index,
     return false;
   }
   motion->SetLoop(loop);
+  if (fade_seconds >= 0.f) {
+    motion->SetFadeInTime(fade_seconds);
+    motion->SetFadeOutTime(fade_seconds);
+  }
   owner->_motionManager->StartMotionPriority(motion, false, MOTION_PRIORITY);
   return true;
+}
+
+bool Animator::motion_duration(const nx::string_view group, const i32 index,
+                               f32 &duration) const {
+  if (reach(m_asset) == nullptr)
+    return false;
+  csm::ACubismMotion *const motion = m_asset->find_motion(group, index);
+  if (motion == nullptr)
+    return false;
+  duration = motion->GetDuration();
+  return duration >= 0.f;
 }
 
 bool Animator::set_expression(const nx::string_view name) {

@@ -12,7 +12,10 @@ public:
   void bind(ModelAsset *asset) noexcept { m_asset = asset; }
   [[nodiscard]] ModelAsset *asset() const noexcept { return m_asset; }
 
-  bool play(nx::string_view group, i32 index, bool loop = false);
+  bool play(nx::string_view group, i32 index, bool loop = false,
+            f32 fade_seconds = -1.f);
+  [[nodiscard]] bool motion_duration(nx::string_view group, i32 index,
+                                     f32 &duration) const;
 
   bool set_expression(nx::string_view name);
 

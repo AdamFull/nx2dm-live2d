@@ -5,6 +5,8 @@
 
 #include "core/foundation/vfs/vfs.h"
 #include "core/rendering/render2d/render_interop.h"
+#include "core/scene/animation_graph.h"
+#include "core/scene/assets.h"
 #include "live2d/live2d_system.h"
 
 namespace {
@@ -146,6 +148,56 @@ TEST_CASE("live2d: a model named by a component is loaded, posed and drawn") {
 
   for (const nxe::r2d::MeshDraw &draw : frame.geometry.draws)
     CHECK((draw.texture >> 16) == PAGE);
+}
+
+TEST_CASE("live2d: an engine graph transitions and fades native motions") {
+  NX_REQUIRE_FIXTURE();
+  World world;
+  REQUIRE(world.ok);
+  world.registry.register_component<scene::AnimationGraphComponent>(
+      {.name = "AnimationGraphComponent"});
+  const scene::Entity entity = world.place(MODEL);
+  REQUIRE(world.system.load_pending(world.registry) == 1u);
+  Live2DRuntime &runtime = world.registry.get<Live2DRuntime>(entity);
+  REQUIRE(!runtime.asset.motions().empty());
+  const MotionEntry &first = runtime.asset.motions()[0];
+  const MotionEntry &second = runtime.asset.motions().size() > 1u
+                                  ? runtime.asset.motions()[1]
+                                  : runtime.asset.motions()[0];
+
+  scene::AnimationGraph graph;
+  graph.add_parameter("next", 0.f);
+  const nx::string first_slot =
+      nx::format("{}#{}", first.group, first.index);
+  const nx::string second_slot =
+      nx::format("{}#{}", second.group, second.index);
+  const u16 first_state = nx::cast<u16>(
+      graph.add_state("first", graph.add_clip_slot(first_slot.view())));
+  const u16 second_state = nx::cast<u16>(
+      graph.add_state("second", graph.add_clip_slot(second_slot.view())));
+  const scene::TransitionCondition change[] = {
+      {0, scene::Compare::Greater, 0.5f}};
+  graph.add_transition(first_state, second_state, change, 0.2f);
+  scene::AssetRegistry assets;
+  const scene::GraphHandle graph_handle = assets.add_graph(std::move(graph));
+  scene::AnimationGraphComponent controller;
+  controller.graph = graph_handle;
+  controller.clip_set = scene::INVALID_CLIP_SET;
+  world.registry.emplace<scene::AnimationGraphComponent>(entity, controller);
+
+  REQUIRE(world.system.update(world.registry, assets, 0.f) == 1u);
+  CHECK(world.registry.get<scene::AnimationGraphComponent>(entity).state ==
+        first_state);
+  CHECK_FALSE(runtime.animator.motion_finished());
+
+  world.registry.get<scene::AnimationGraphComponent>(entity).params[0] = 1.f;
+  REQUIRE(world.system.update(world.registry, assets, 0.016f) == 1u);
+  const scene::AnimationGraphComponent &transitioned =
+      world.registry.get<scene::AnimationGraphComponent>(entity);
+  CHECK(transitioned.state == second_state);
+  CHECK(transitioned.blending());
+  CHECK(transitioned.blend_duration == nxtest::Approx(0.2f));
+  CHECK_FALSE(runtime.animator.motion_finished());
 }
 
 TEST_CASE("live2d: the component's placement and scale reach the vertices") {

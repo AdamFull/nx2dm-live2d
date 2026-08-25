@@ -3,10 +3,11 @@
 #include "live2d/live2d_asset_bundle.h"
 
 #include "core/foundation/platform/filesystem.h"
-#include "core/foundation/serialization/json.h"
+#include "core/foundation/serialization/json_document.h"
 #include "core/foundation/strings/format.h"
 
 #include <cstdio>
+#include <cstring>
 
 namespace assetc {
 namespace {
@@ -37,15 +38,19 @@ struct Inputs {
          value.substr(value.size() - suffix.size()) == suffix;
 }
 
-[[nodiscard]] bool valid_json_resource(const OwnedResource &resource) {
+[[nodiscard]] bool normalize_json_resource(OwnedResource &resource) {
   if (!ends_with(resource.name.view(), ".json"))
     return true;
   const nx::string_view text(
       reinterpret_cast<const char *>(resource.bytes.data()),
       resource.bytes.size());
-  const auto parsed = nx::json::parse(
-      text, {.reject_duplicate_keys = true, .validate_utf8 = true});
-  return parsed && parsed.value().is_object();
+  auto normalized = nx::json::normalize_asset_document(text);
+  if (!normalized)
+    return false;
+  nx::blob<u8> bytes(normalized->size());
+  std::memcpy(bytes.data(), normalized->data(), normalized->size());
+  resource.bytes = std::move(bytes);
+  return true;
 }
 
 [[nodiscard]] bool read_inputs(const nx::string_view source, Inputs &out,
@@ -57,13 +62,21 @@ struct Inputs {
     return false;
   }
   Inputs loaded;
-  const nx::string_view model_text(
+  const nx::string_view authored_model_text(
       reinterpret_cast<const char *>(model->data()), model->size());
-  if (!nxm::live2d::parse_model_manifest(model_text, loaded.manifest, error))
+  auto normalized_model =
+      nx::json::normalize_asset_document(authored_model_text);
+  if (!normalized_model ||
+      !nxm::live2d::parse_model_manifest(normalized_model->view(),
+                                         loaded.manifest, error))
     return false;
   loaded.manifest_name = nx::string(nx::fs::path::filename(source));
   loaded.resources.reserve(loaded.manifest.embedded.size() + 1u);
-  loaded.resources.push_back({loaded.manifest_name, std::move(model.value())});
+  nx::blob<u8> manifest_bytes(normalized_model->size());
+  std::memcpy(manifest_bytes.data(), normalized_model->data(),
+              normalized_model->size());
+  loaded.resources.push_back(
+      {loaded.manifest_name, std::move(manifest_bytes)});
 
   const nx::string_view parent = nx::fs::path::parent_path(source);
   usize total = loaded.resources.front().bytes.size();
@@ -76,12 +89,12 @@ struct Inputs {
       error = nx::format("cannot read bounded model resource '{}'", path);
       return false;
     }
-    total += bytes->size();
     loaded.resources.push_back({name, std::move(bytes.value())});
-    if (!valid_json_resource(loaded.resources.back())) {
+    if (!normalize_json_resource(loaded.resources.back())) {
       error = nx::format("model resource '{}' is not valid JSON", path);
       return false;
     }
+    total += loaded.resources.back().bytes.size();
   }
   for (const nx::string &name : loaded.manifest.textures) {
     const nx::string path = nx::fs::path_view(parent) / name.view();

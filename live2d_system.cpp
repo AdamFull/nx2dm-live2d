@@ -2,8 +2,11 @@
 
 #include "core/foundation/diagnostics/log.h"
 #include "core/rendering/render2d/material_system.h"
+#include "core/scene/animation_graph.h"
+#include "core/scene/assets.h"
 
 #include <cmath>
+#include <limits>
 
 namespace nxm::live2d {
 namespace {
@@ -15,6 +18,30 @@ constexpr f32 LOAD_RETRY_MAX_SECONDS = 30.f;
 constexpr u32 MIN_MASK_RESOLUTION = 64;
 constexpr u32 MAX_MASK_ATLASES = 16;
 constexpr u64 MASK_TEXEL_BYTES = 4;
+
+struct MotionRef {
+  nx::string_view group;
+  i32 index = 0;
+};
+
+/// A graph slot names a motion group and may select an entry as `Group#2`.
+/// Without a suffix the component's motion_index remains the project default.
+[[nodiscard]] MotionRef motion_ref(const nx::string_view slot,
+                                   const i32 fallback) noexcept {
+  const usize hash = slot.find_last_of('#');
+  if (hash == nx::string_view::npos || hash == 0 || hash + 1 >= slot.size())
+    return {slot, fallback};
+  i64 index = 0;
+  for (usize i = hash + 1; i < slot.size(); ++i) {
+    const char digit = slot[i];
+    if (digit < '0' || digit > '9')
+      return {slot, fallback};
+    index = index * 10 + (digit - '0');
+    if (index > std::numeric_limits<i32>::max())
+      return {slot, fallback};
+  }
+  return {slot.substr(0, hash), nx::cast<i32>(index)};
+}
 
 }
 
@@ -118,21 +145,60 @@ usize Live2DSystem::drive_lip_sync(scene::registry_t &registry,
   return speaking;
 }
 
-usize Live2DSystem::update(scene::registry_t &registry, const f32 dt) {
+usize Live2DSystem::update(scene::registry_t &registry,
+                           const scene::AssetRegistry &assets, const f32 dt) {
   usize stepped = 0;
-  registry.view<Live2DModel, Live2DRuntime>().each([&](const scene::Entity,
+  registry.view<Live2DModel, Live2DRuntime>().each([&](const scene::Entity e,
                                                        const Live2DModel &model,
                                                        Live2DRuntime &runtime) {
     if (!runtime.ready() || runtime.loaded != model.model)
       return;
+    f32 animation_speed = 1.f;
+    if (auto *controller =
+            registry.try_get<scene::AnimationGraphComponent>(e);
+        controller != nullptr && !controller->clip_set.valid()) {
+      const scene::AnimationGraph *const graph = assets.graph(controller->graph);
+      if (graph != nullptr) {
+        const auto duration = [&](const u32 slot, const u16, f32 &seconds) {
+          const MotionRef motion =
+              motion_ref(graph->clip_slot_name(slot), model.motion_index);
+          return runtime.animator.motion_duration(motion.group, motion.index,
+                                                  seconds);
+        };
+        scene::GraphTick tick;
+        if (scene::update_animation_state_machine(
+                *controller, *graph, duration, dt * model.time_scale, tick)) {
+          const scene::AnimationState *const state =
+              graph->state(controller->state);
+          if (state != nullptr) {
+            animation_speed = state->speed * controller->speed;
+            if (tick.entered != scene::INVALID_STATE) {
+              const MotionRef motion = motion_ref(
+                  graph->clip_slot_name(state->clip_slot), model.motion_index);
+              (void)runtime.animator.play(
+                  motion.group, motion.index,
+                  state->mode == scene::PlayMode::Loop,
+                  controller->blending() ? controller->blend_duration : 0.f);
+            }
+          }
+          if (!controller->playing)
+            animation_speed = 0.f;
+        }
+      }
+    }
     runtime.animator.set_blinking(model.blink);
     runtime.animator.set_breathing(model.breathe);
     runtime.animator.set_mouth(model.mouth);
-    runtime.animator.update(dt * model.time_scale);
+    runtime.animator.update(dt * model.time_scale * animation_speed);
     runtime.masks.update(runtime.asset);
     ++stepped;
   });
   return stepped;
+}
+
+usize Live2DSystem::update(scene::registry_t &registry, const f32 dt) {
+  static const scene::AssetRegistry no_graph_assets;
+  return update(registry, no_graph_assets, dt);
 }
 
 usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
