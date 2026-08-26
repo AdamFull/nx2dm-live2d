@@ -85,8 +85,11 @@ ModelAsset::ModelAsset(ModelAsset &&other) noexcept
     : m_owner(other.m_owner), m_textures(std::move(other.m_textures)),
       m_motions(std::move(other.m_motions)),
       m_expressions(std::move(other.m_expressions)),
-      m_missing(std::move(other.m_missing)), m_canvas(other.m_canvas),
-      m_physics(other.m_physics), m_pose(other.m_pose) {
+      m_missing(std::move(other.m_missing)),
+      m_lip_sync(std::move(other.m_lip_sync)),
+      m_dependencies(std::move(other.m_dependencies)), m_canvas(other.m_canvas),
+      m_physics(other.m_physics), m_pose(other.m_pose),
+      m_eye_blink(other.m_eye_blink) {
   other.m_owner = nullptr;
 }
 
@@ -98,9 +101,12 @@ ModelAsset &ModelAsset::operator=(ModelAsset &&other) noexcept {
     m_motions = std::move(other.m_motions);
     m_expressions = std::move(other.m_expressions);
     m_missing = std::move(other.m_missing);
+    m_lip_sync = std::move(other.m_lip_sync);
+    m_dependencies = std::move(other.m_dependencies);
     m_canvas = other.m_canvas;
     m_physics = other.m_physics;
     m_pose = other.m_pose;
+    m_eye_blink = other.m_eye_blink;
     other.m_owner = nullptr;
   }
   return *this;
@@ -120,9 +126,12 @@ void ModelAsset::reset() noexcept {
   }
   m_textures.clear();
   m_missing.clear();
+  m_lip_sync.clear();
+  m_dependencies.clear();
   m_canvas = {};
   m_physics = false;
   m_pose = false;
+  m_eye_blink = false;
 }
 
 csm::CubismModel *ModelAsset::model() const noexcept {
@@ -189,6 +198,7 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   nx::string cooked_path(model3_path);
   if (!explicit_cooked)
     cooked_path += ".nxb";
+  out.m_dependencies.push_back(cooked_path);
   const nx::vfs::FileInfo cooked_info = nx::vfs::stat(cooked_path.view());
   if (cooked_info.exists) {
     if (cooked_info.is_directory ||
@@ -212,6 +222,7 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
       error = nx::format("no cooked model at '{}'", cooked_path);
       return false;
     }
+    out.m_dependencies.push_back(authored_path);
     auto bytes = nx::vfs::read(authored_path.view());
     if (!bytes || bytes->empty() || bytes->size() > MAX_LIVE2D_MANIFEST_BYTES) {
       error = nx::format("no bounded model at '{}'", authored_path);
@@ -239,6 +250,8 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
     return false;
   }
   const nx::string moc_path = beside(authored_path.view(), moc_name);
+  if (!bundle)
+    out.m_dependencies.push_back(moc_path);
   const LoadedResource moc = read_resource(bundle ? &bundle.value() : nullptr,
                                            authored_path.view(), moc_name);
   if (!moc) {
@@ -277,6 +290,8 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   const auto read_optional = [&](const nx::string_view name,
                                  nx::string &path_out) {
     path_out = beside(authored_path.view(), name);
+    if (!bundle)
+      out.m_dependencies.push_back(path_out);
     LoadedResource bytes = read_resource(bundle ? &bundle.value() : nullptr,
                                          authored_path.view(), name);
     if (!bytes) {
@@ -295,6 +310,7 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
       continue;
     }
     const nx::string path = beside(authored_path.view(), name);
+    out.m_dependencies.push_back(path);
     const u32 packed =
         resolve ? resolve(path) : pack_texture(NX_TEXTURE_NONE, 0);
     if ((packed >> 16) == NX_TEXTURE_NONE)

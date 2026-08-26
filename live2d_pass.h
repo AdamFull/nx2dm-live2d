@@ -50,6 +50,10 @@ public:
 
   [[nodiscard]] bool init(nxe::rhi::Device &device,
                           nxe::rhi::ShaderHandle shader, u32 sampler);
+  /// Swaps only the validated shader generation. Model state, mask layouts,
+  /// and upload-ring allocations remain live; pipelines rebuild lazily.
+  [[nodiscard]] bool reload_shader(nxe::rhi::Device &device,
+                                   nxe::rhi::ShaderHandle shader);
   void shutdown(nxe::rhi::Device &device);
 
   [[nodiscard]] bool ready() const noexcept { return m_shader.valid(); }

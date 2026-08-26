@@ -98,6 +98,9 @@ public:
   [[nodiscard]] std::span<const nx::string> missing() const noexcept {
     return {m_missing.data(), m_missing.size()};
   }
+  [[nodiscard]] std::span<const nx::string> dependencies() const noexcept {
+    return {m_dependencies.data(), m_dependencies.size()};
+  }
 
 private:
   friend bool load_model(nx::string_view, TextureResolver, ModelAsset &,
@@ -111,6 +114,7 @@ private:
   nx::vector<ExpressionEntry> m_expressions;
   nx::vector<nx::string> m_missing;
   nx::vector<nx::string> m_lip_sync;
+  nx::vector<nx::string> m_dependencies;
   CanvasInfo m_canvas;
   bool m_physics = false;
   bool m_pose = false;

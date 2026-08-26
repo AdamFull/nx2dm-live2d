@@ -35,6 +35,7 @@ struct Live2DRuntime {
   nx::string loaded;
   f32 retry_in = 0.f;
   u32 load_failures = 0;
+  u64 source_stamp = 0;
 
   Live2DRuntime() = default;
   ~Live2DRuntime() = default;
@@ -45,7 +46,8 @@ struct Live2DRuntime {
   Live2DRuntime(Live2DRuntime &&other) noexcept
       : asset(std::move(other.asset)), masks(std::move(other.masks)),
         requested(std::move(other.requested)), loaded(std::move(other.loaded)),
-        retry_in(other.retry_in), load_failures(other.load_failures) {
+        retry_in(other.retry_in), load_failures(other.load_failures),
+        source_stamp(other.source_stamp) {
     animator = std::move(other.animator);
     animator.bind(&asset);
     other.animator.bind(nullptr);
@@ -59,6 +61,7 @@ struct Live2DRuntime {
       loaded = std::move(other.loaded);
       retry_in = other.retry_in;
       load_failures = other.load_failures;
+      source_stamp = other.source_stamp;
       animator = std::move(other.animator);
       animator.bind(&asset);
       other.animator.bind(nullptr);

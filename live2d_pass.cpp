@@ -52,11 +52,32 @@ bool ModelRenderer::init(rhi::Device &device, const rhi::ShaderHandle shader,
       "live2d vertices", "live2d indices", "live2d mask vertices",
       "live2d mask indices"};
   static_assert(nx::array_size(ARRAYS) == ARRAY_COUNT);
-  if (!m_ring.init(&device, ARRAYS))
+  if (!m_ring.init(&device, ARRAYS)) {
+    device.destroy_shader(shader);
     return false;
+  }
 
   m_shader = shader;
   m_sampler = sampler;
+  return true;
+}
+
+bool ModelRenderer::reload_shader(rhi::Device &device,
+                                  const rhi::ShaderHandle shader) {
+  if (!shader.valid())
+    return false;
+  for (rhi::PipelineHandle &pipeline : m_model_pipeline) {
+    if (pipeline.valid())
+      device.destroy_pipeline(pipeline);
+    pipeline = {};
+  }
+  if (m_mask_pipeline.valid())
+    device.destroy_pipeline(m_mask_pipeline);
+  m_mask_pipeline = {};
+  if (m_shader.valid())
+    device.destroy_shader(m_shader);
+  m_shader = shader;
+  m_format = rhi::Format::Unknown;
   return true;
 }
 

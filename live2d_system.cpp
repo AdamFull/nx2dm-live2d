@@ -4,6 +4,7 @@
 #include "core/rendering/render2d/material_system.h"
 #include "core/scene/animation_graph.h"
 #include "core/scene/assets.h"
+#include "core/foundation/vfs/vfs.h"
 
 #include <cmath>
 #include <limits>
@@ -18,6 +19,22 @@ constexpr f32 LOAD_RETRY_MAX_SECONDS = 30.f;
 constexpr u32 MIN_MASK_RESOLUTION = 64;
 constexpr u32 MAX_MASK_ATLASES = 16;
 constexpr u64 MASK_TEXEL_BYTES = 4;
+
+[[nodiscard]] u64 source_stamp(
+    const std::span<const nx::string> dependencies) noexcept {
+  u64 stamp = 14695981039346656037ull;
+  for (const nx::string &path : dependencies) {
+    const nx::vfs::FileInfo info = nx::vfs::stat(path.view());
+    const u64 words[] = {nx::hash_fnv1a64(path.data(), path.size()),
+                         info.mtime_ns, info.size,
+                         info.exists ? 1ull : 0ull};
+    for (const u64 word : words) {
+      stamp ^= word;
+      stamp *= 1099511628211ull;
+    }
+  }
+  return stamp;
+}
 
 struct MotionRef {
   nx::string_view group;
@@ -121,8 +138,66 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
     (void)runtime->masks.build(runtime->asset,
                                mask_resolution(model.mask_resolution), 1);
     runtime->masks.update(runtime->asset);
+    runtime->source_stamp = source_stamp(runtime->asset.dependencies());
     ++loaded;
   }
+  return loaded;
+}
+
+usize Live2DSystem::reload_changed(scene::registry_t &registry) {
+  usize loaded = 0;
+  registry.view<const Live2DModel, Live2DRuntime>().each(
+      [&](const scene::Entity, const Live2DModel &model,
+          Live2DRuntime &runtime) {
+        if (!runtime.ready() || runtime.loaded != model.model)
+          return;
+        const u64 changed = source_stamp(runtime.asset.dependencies());
+        if (changed == runtime.source_stamp)
+          return;
+        // Observe this failed generation once. A subsequent editor save has a
+        // different stamp and retries; the current runtime remains untouched.
+        runtime.source_stamp = changed;
+
+        ModelAsset fresh_asset;
+        nx::string error;
+        if (!load_model(model.model.view(), m_resolve, fresh_asset, error)) {
+          nx::logw("live2d: '{}' changed but its last valid generation remains: "
+                   "{}",
+                   model.model, error);
+          return;
+        }
+
+        const nx::string motion(runtime.animator.motion_group());
+        const i32 motion_index = runtime.animator.motion_index();
+        const bool motion_loop = runtime.animator.motion_loop();
+        const nx::string expression(runtime.animator.expression());
+        const f32 elapsed = runtime.animator.elapsed();
+        const bool blinking = runtime.animator.blinking();
+        const bool breathing = runtime.animator.breathing();
+        const f32 mouth = runtime.animator.mouth();
+
+        Live2DRuntime fresh;
+        fresh.asset = std::move(fresh_asset);
+        fresh.requested = model.model;
+        fresh.loaded = model.model;
+        fresh.animator.bind(&fresh.asset);
+        fresh.animator.set_blinking(blinking);
+        fresh.animator.set_breathing(breathing);
+        fresh.animator.set_mouth(mouth);
+        if (!motion.empty())
+          (void)fresh.animator.play(motion.view(), motion_index, motion_loop,
+                                    0.f);
+        if (!expression.empty())
+          (void)fresh.animator.set_expression(expression.view());
+        fresh.animator.update(elapsed);
+        (void)fresh.masks.build(fresh.asset,
+                                mask_resolution(model.mask_resolution), 1);
+        fresh.masks.update(fresh.asset);
+        fresh.source_stamp = source_stamp(fresh.asset.dependencies());
+        runtime = std::move(fresh);
+        ++loaded;
+        nx::logi("live2d: reloaded '{}'", model.model);
+      });
   return loaded;
 }
 

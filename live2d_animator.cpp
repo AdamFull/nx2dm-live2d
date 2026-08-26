@@ -56,6 +56,9 @@ bool Animator::play(const nx::string_view group, const i32 index,
     motion->SetFadeOutTime(fade_seconds);
   }
   owner->_motionManager->StartMotionPriority(motion, false, MOTION_PRIORITY);
+  m_motion_group = nx::string(group);
+  m_motion_index = index;
+  m_motion_loop = loop;
   return true;
 }
 

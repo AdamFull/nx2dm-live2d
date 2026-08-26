@@ -69,10 +69,28 @@ public:
     expose_live2d_services(host, ctx);
   }
 
+  void on_hot_reload(nxe::ModuleContext &ctx) override {
+    (void)m_system.reload_changed(ctx.scene().registry());
+    if (!ctx.shader_reloaded(SHADER))
+      return;
+    const nxe::rhi::ShaderHandle shader = ctx.load_shader(SHADER);
+    if (!shader.valid()) {
+      nx::logw(
+          "live2d: changed shader is invalid; keeping the last generation");
+      return;
+    }
+    const bool loaded =
+        m_renderer.ready()
+            ? m_renderer.reload_shader(ctx.device(), shader)
+            : m_renderer.init(ctx.device(), shader, m_sampler);
+    if (loaded)
+      nx::logi("live2d: renderer shader reloaded");
+  }
+
   bool on_attach(nxe::ModuleContext &ctx) override {
-    const bool can_draw =
-        m_renderer.init(ctx.device(), ctx.load_shader(SHADER),
-                        ctx.samplers().index(nxe::scene::sampler_bilinear()));
+    m_sampler = ctx.samplers().index(nxe::scene::sampler_bilinear());
+    const bool can_draw = m_renderer.init(ctx.device(), ctx.load_shader(SHADER),
+                                          m_sampler);
     if (!can_draw)
       nx::logw("live2d: no renderer; models will load and pose but not draw");
 
@@ -108,9 +126,6 @@ public:
         }));
     ctx.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
 
-    if (!can_draw)
-      return true;
-
     ctx.passes().define(
         DRAW_PASS, nxe::PassFn([this, &ctx](nxe::rg::RenderGraph &graph,
                                             nxe::RenderContext &context) {
@@ -141,6 +156,7 @@ public:
 
   void on_detach(nxe::ModuleContext &ctx) override {
     m_renderer.shutdown(ctx.device());
+    m_sampler = 0;
   }
 
   void on_unregister(nxe::ModuleContext &) override {
@@ -159,6 +175,7 @@ public:
 private:
   ModelRenderer m_renderer;
   Live2DSystem m_system;
+  u32 m_sampler = 0;
 };
 
 }

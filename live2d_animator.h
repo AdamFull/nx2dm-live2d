@@ -37,6 +37,11 @@ public:
 
   [[nodiscard]] bool motion_finished() const noexcept;
   [[nodiscard]] f32 elapsed() const noexcept { return m_elapsed; }
+  [[nodiscard]] nx::string_view motion_group() const noexcept {
+    return m_motion_group.view();
+  }
+  [[nodiscard]] i32 motion_index() const noexcept { return m_motion_index; }
+  [[nodiscard]] bool motion_loop() const noexcept { return m_motion_loop; }
   [[nodiscard]] nx::string_view expression() const noexcept {
     return m_expression.view();
   }
@@ -44,6 +49,9 @@ public:
 private:
   ModelAsset *m_asset = nullptr;
   nx::string m_expression;
+  nx::string m_motion_group;
+  i32 m_motion_index = 0;
+  bool m_motion_loop = false;
   f32 m_elapsed = 0.f;
   f32 m_mouth = 0.f;
   bool m_blinking = false;
