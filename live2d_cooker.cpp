@@ -44,7 +44,10 @@ struct Inputs {
   const nx::string_view text(
       reinterpret_cast<const char *>(resource.bytes.data()),
       resource.bytes.size());
-  auto normalized = nx::json::normalize_asset_document(text);
+  // Cubism's JSON reader does not accept a closing brace or bracket as the
+  // delimiter after a number. Formatted output gives every terminal numeric
+  // value a newline delimiter while retaining strict, comment-free JSON.
+  auto normalized = nx::json::normalize_asset_document(text, {.indent = 2});
   if (!normalized)
     return false;
   nx::blob<u8> bytes(normalized->size());
@@ -65,7 +68,7 @@ struct Inputs {
   const nx::string_view authored_model_text(
       reinterpret_cast<const char *>(model->data()), model->size());
   auto normalized_model =
-      nx::json::normalize_asset_document(authored_model_text);
+      nx::json::normalize_asset_document(authored_model_text, {.indent = 2});
   if (!normalized_model ||
       !nxm::live2d::parse_model_manifest(normalized_model->view(),
                                          loaded.manifest, error))
@@ -75,8 +78,7 @@ struct Inputs {
   nx::blob<u8> manifest_bytes(normalized_model->size());
   std::memcpy(manifest_bytes.data(), normalized_model->data(),
               normalized_model->size());
-  loaded.resources.push_back(
-      {loaded.manifest_name, std::move(manifest_bytes)});
+  loaded.resources.push_back({loaded.manifest_name, std::move(manifest_bytes)});
 
   const nx::string_view parent = nx::fs::path::parent_path(source);
   usize total = loaded.resources.front().bytes.size();

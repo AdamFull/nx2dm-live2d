@@ -17,6 +17,9 @@
 #include <Id/CubismIdManager.hpp>
 #include <Live2DCubismCore.hpp>
 #include <Model/CubismUserModel.hpp>
+#include <Utils/CubismJson.hpp>
+
+#include <limits>
 
 namespace nxm::live2d {
 namespace {
@@ -59,6 +62,19 @@ struct LoadedResource {
     return !bytes.empty();
   }
 };
+
+[[nodiscard]] bool cubism_json_valid(const std::span<const u8> bytes) {
+  if (bytes.empty() ||
+      bytes.size() >
+          nx::cast<usize>(std::numeric_limits<csm::csmSizeInt>::max()))
+    return false;
+  csm::Utils::CubismJson *const json = csm::Utils::CubismJson::Create(
+      bytes.data(), nx::cast<csm::csmSizeInt>(bytes.size()));
+  if (json == nullptr)
+    return false;
+  csm::Utils::CubismJson::Delete(json);
+  return true;
+}
 
 [[nodiscard]] LoadedResource read_resource(const ModelBundleView *const bundle,
                                            const nx::string_view model_path,
@@ -240,6 +256,28 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
     }
   }
 
+  // Several specialized Cubism JSON constructors do not remain safe after
+  // their internal parser rejects a document. Validate the exact byte spans
+  // first so a corrupt or parser-incompatible pack becomes a normal load
+  // error instead of exposing an invalid SDK object.
+  if (!cubism_json_valid(manifest)) {
+    error = nx::format("{}: is not valid Cubism JSON", authored_path);
+    return false;
+  }
+  if (bundle) {
+    for (const nx::string &name : bundle->manifest.embedded) {
+      if (!ends_with(name.view(), ".json"))
+        continue;
+      const std::span<const u8> bytes = bundle->resources.find(name.view());
+      if (!cubism_json_valid(bytes)) {
+        error =
+            nx::format("{}: embedded resource '{}' is not valid Cubism JSON",
+                       authored_path, name);
+        return false;
+      }
+    }
+  }
+
   csm::CubismModelSettingJson settings(
       const_cast<csm::csmByte *>(manifest.data()),
       nx::cast<csm::csmSizeInt>(manifest.size()));
@@ -302,6 +340,15 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
     return bytes;
   };
 
+  const auto valid_optional_json = [&](const LoadedResource &resource,
+                                       const nx::string_view resource_path) {
+    if (bundle || cubism_json_valid(resource.bytes))
+      return true;
+    error = nx::format("{}: is not valid Cubism JSON", resource_path);
+    out.reset();
+    return false;
+  };
+
   out.m_textures.reserve(nx::cast<usize>(settings.GetTextureCount()));
   for (i32 i = 0; i < settings.GetTextureCount(); ++i) {
     const char *const name = settings.GetTextureFileName(i);
@@ -322,6 +369,8 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   nx::string path;
   if (const char *const name = settings.GetPhysicsFileName(); !empty_name(name))
     if (const auto bytes = read_optional(name, path)) {
+      if (!valid_optional_json(bytes, path.view()))
+        return false;
       owner->LoadPhysics(bytes.bytes.data(),
                          nx::cast<csm::csmSizeInt>(bytes.bytes.size()));
       out.m_physics = owner->_physics != nullptr;
@@ -329,15 +378,20 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
 
   if (const char *const name = settings.GetPoseFileName(); !empty_name(name))
     if (const auto bytes = read_optional(name, path)) {
+      if (!valid_optional_json(bytes, path.view()))
+        return false;
       owner->LoadPose(bytes.bytes.data(),
                       nx::cast<csm::csmSizeInt>(bytes.bytes.size()));
       out.m_pose = owner->_pose != nullptr;
     }
 
   if (const char *const name = settings.GetUserDataFile(); !empty_name(name))
-    if (const auto bytes = read_optional(name, path))
+    if (const auto bytes = read_optional(name, path)) {
+      if (!valid_optional_json(bytes, path.view()))
+        return false;
       owner->LoadUserData(bytes.bytes.data(),
                           nx::cast<csm::csmSizeInt>(bytes.bytes.size()));
+    }
 
   for (i32 i = 0; i < settings.GetExpressionCount(); ++i) {
     const char *const file = settings.GetExpressionFileName(i);
@@ -346,6 +400,8 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
     const auto bytes = read_optional(file, path);
     if (!bytes)
       continue;
+    if (!valid_optional_json(bytes, path.view()))
+      return false;
     const char *const name = settings.GetExpressionName(i);
     csm::ACubismMotion *const motion = owner->LoadExpression(
         bytes.bytes.data(), nx::cast<csm::csmSizeInt>(bytes.bytes.size()),
@@ -363,6 +419,8 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
       const auto bytes = read_optional(file, path);
       if (!bytes)
         continue;
+      if (!valid_optional_json(bytes, path.view()))
+        return false;
 
       const nx::string name = nx::format("{}_{}", group, i);
       csm::ACubismMotion *const motion = owner->LoadMotion(
