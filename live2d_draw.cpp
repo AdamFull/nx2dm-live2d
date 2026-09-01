@@ -228,7 +228,8 @@ usize emit(const ModelAsset &asset, const ModelView &view,
       sorted.begin(), sorted.end(),
       [order](const i32 a, const i32 b) { return order[a] < order[b]; });
 
-  const u32 layer = nx::cast<u32>(view.layer + 2048) & 0xFFFu;
+  const u32 layer =
+      nx::cast<u32>(nx::clamp(view.layer, -32768, 32767) + 32768);
   const u32 key = nx_make_sort_key(
       layer,
       r2d::quantize_depth(view.world[2][1], view.depth_min, view.depth_max),
