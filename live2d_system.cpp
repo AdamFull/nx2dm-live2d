@@ -22,18 +22,7 @@ constexpr u64 MASK_TEXEL_BYTES = 4;
 
 [[nodiscard]] u64 source_stamp(
     const std::span<const nx::string> dependencies) noexcept {
-  u64 stamp = 14695981039346656037ull;
-  for (const nx::string &path : dependencies) {
-    const nx::vfs::FileInfo info = nx::vfs::stat(path.view());
-    const u64 words[] = {nx::hash_fnv1a64(path.data(), path.size()),
-                         info.mtime_ns, info.size,
-                         info.exists ? 1ull : 0ull};
-    for (const u64 word : words) {
-      stamp ^= word;
-      stamp *= 1099511628211ull;
-    }
-  }
-  return stamp;
+  return nx::vfs::files_generation(dependencies);
 }
 
 struct MotionRef {
