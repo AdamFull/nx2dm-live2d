@@ -121,7 +121,7 @@ source_views(const Inputs &inputs) {
   return sources;
 }
 
-[[nodiscard]] bool cook_live2d(const CookContext &context) {
+[[nodiscard]] bool cook_live2d(const CookContext &context, CookOutputs &) {
   Inputs inputs;
   nx::string error;
   if (!read_inputs(context.source, inputs, error)) {
