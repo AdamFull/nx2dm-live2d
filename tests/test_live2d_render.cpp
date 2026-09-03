@@ -11,7 +11,6 @@
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_draw.h"
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
 #include <cstdlib>
