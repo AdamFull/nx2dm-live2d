@@ -138,7 +138,7 @@ bool MaskLayout::build(const ModelAsset &asset, const u32 atlas_size,
                          render::CubismRenderer::DrawableObjectType_Drawable);
 
   m_refs.resize(nx::cast<usize>(model->GetDrawableCount()));
-  nx::logi("live2d: {} mask groups over {} drawables, {}x{} atlas x{}",
+  nx::logd("live2d: {} mask groups over {} drawables, {}x{} atlas x{}",
            m_clipping->masks().GetSize(), model->GetDrawableCount(), atlas_size,
            atlas_size, atlas_count);
   return true;

@@ -84,7 +84,7 @@ public:
             ? m_renderer.reload_shader(ctx.device(), shader)
             : m_renderer.init(ctx.device(), shader, m_sampler);
     if (loaded)
-      nx::logi("live2d: renderer shader reloaded");
+      nx::logd("live2d: renderer shader reloaded");
   }
 
   bool on_attach(nxe::ModuleContext &ctx) override {

@@ -461,7 +461,7 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   }
 
   owner->IsInitialized(true);
-  nx::logi("live2d: '{}' - {} parameters, {} parts, {} drawables, {} motions, "
+  nx::logd("live2d: '{}' - {} parameters, {} parts, {} drawables, {} motions, "
            "{} expressions{}{}",
            authored_path, out.parameter_count(), out.part_count(),
            out.drawable_count(), out.motions().size(), out.expressions().size(),

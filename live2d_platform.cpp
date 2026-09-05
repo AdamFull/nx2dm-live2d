@@ -28,7 +28,7 @@ public:
 };
 
 void log_line(const char *const message) {
-  nx::logi("live2d: {}", message != nullptr ? message : "");
+  nx::logw("live2d: {}", message != nullptr ? message : "");
 }
 
 Allocator &allocator() {
@@ -66,7 +66,7 @@ bool install_platform() {
   g_started = true;
 
   const CoreVersion version = core_version();
-  nx::logi("live2d: Cubism Core {}.{}.{}, moc3 up to format {}", version.major,
+  nx::logd("live2d: Cubism Core {}.{}.{}, moc3 up to format {}", version.major,
            version.minor, version.patch, latest_moc_version());
   return true;
 }

@@ -185,7 +185,7 @@ usize Live2DSystem::reload_changed(scene::registry_t &registry) {
         fresh.source_stamp = source_stamp(fresh.asset.dependencies());
         runtime = std::move(fresh);
         ++loaded;
-        nx::logi("live2d: reloaded '{}'", model.model);
+        nx::logd("live2d: reloaded '{}'", model.model);
       });
   return loaded;
 }
