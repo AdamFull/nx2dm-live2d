@@ -30,7 +30,7 @@ struct Exposed {
   }
 };
 
-}
+} // namespace
 
 TEST_CASE("live2d scripting: every service is exposed with the shape a script "
           "is told about") {
@@ -72,7 +72,8 @@ TEST_CASE("live2d scripting: the module hands them over on its own") {
   script::Host host;
   found->on_expose_scripts(host, ctx);
 
-  const Exposed direct;
-  CHECK(host.exposed_count() == direct.services.size());
+  script::Host direct;
+  expose_live2d_services(direct, ctx);
+  CHECK(host.exposed_count() == direct.exposed_count());
   CHECK(host.exposed_count() > 0u);
 }
