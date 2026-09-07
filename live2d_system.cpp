@@ -1,10 +1,10 @@
 #include "live2d/live2d_system.h"
 
 #include "core/foundation/diagnostics/log.h"
+#include "core/foundation/vfs/vfs.h"
 #include "core/rendering/render2d/material_system.h"
 #include "core/scene/animation_graph.h"
 #include "core/scene/assets.h"
-#include "core/foundation/vfs/vfs.h"
 
 #include <cmath>
 #include <limits>
@@ -20,8 +20,8 @@ constexpr u32 MIN_MASK_RESOLUTION = 64;
 constexpr u32 MAX_MASK_ATLASES = 16;
 constexpr u64 MASK_TEXEL_BYTES = 4;
 
-[[nodiscard]] u64 source_stamp(
-    const std::span<const nx::string> dependencies) noexcept {
+[[nodiscard]] u64
+source_stamp(const std::span<const nx::string> dependencies) noexcept {
   return nx::vfs::files_generation(dependencies);
 }
 
@@ -49,7 +49,7 @@ struct MotionRef {
   return {slot.substr(0, hash), nx::cast<i32>(index)};
 }
 
-}
+} // namespace
 
 void Live2DSystem::register_components(scene::registry_t &registry) {
   registry.register_component<Live2DModel>({.name = "Live2DModel"});
@@ -65,8 +65,8 @@ void Live2DSystem::set_mask_limits(const u32 max_resolution, const u64 bytes,
   m_mask_resolution_limit =
       nx::clamp(max_resolution, MIN_MASK_RESOLUTION, 16384u);
   m_mask_atlas_limit = nx::clamp(atlas_count, 1u, MAX_MASK_ATLASES);
-  constexpr u64 smallest = u64{MIN_MASK_RESOLUTION} * MIN_MASK_RESOLUTION *
-                           MASK_TEXEL_BYTES;
+  constexpr u64 smallest =
+      u64{MIN_MASK_RESOLUTION} * MIN_MASK_RESOLUTION * MASK_TEXEL_BYTES;
   m_mask_budget = nx::max(bytes, smallest);
   m_budget_warned = false;
 }
@@ -98,8 +98,8 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
     const Live2DModel &model = registry.get<Live2DModel>(e);
     Live2DRuntime *runtime = registry.try_get<Live2DRuntime>(e);
     if (runtime == nullptr || runtime->requested != model.model)
-      runtime = registry.try_emplace_or_replace<Live2DRuntime>(
-          e, Live2DRuntime{});
+      runtime =
+          registry.try_emplace_or_replace<Live2DRuntime>(e, Live2DRuntime{});
     runtime->requested = model.model;
     runtime->animator.bind(nullptr);
     runtime->masks.clear();
@@ -110,9 +110,9 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
       nx::loge("live2d: {}", error);
       runtime->loaded.clear();
       const u32 exponent = nx::min(runtime->load_failures, 5u);
-      runtime->retry_in = nx::min(
-          LOAD_RETRY_BASE_SECONDS * nx::cast<f32>(u32{1} << exponent),
-          LOAD_RETRY_MAX_SECONDS);
+      runtime->retry_in =
+          nx::min(LOAD_RETRY_BASE_SECONDS * nx::cast<f32>(u32{1} << exponent),
+                  LOAD_RETRY_MAX_SECONDS);
       runtime->load_failures = nx::min(runtime->load_failures + 1u, 32u);
       continue;
     }
@@ -122,7 +122,7 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
     runtime->animator.bind(&runtime->asset);
     if (!model.motion.empty() || model.motion_index != 0)
       (void)runtime->animator.play(model.motion.view(), model.motion_index,
-                                  model.motion_loop);
+                                   model.motion_loop);
     runtime->animator.update(0.f);
     (void)runtime->masks.build(runtime->asset,
                                mask_resolution(model.mask_resolution), 1);
@@ -133,7 +133,8 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
   return loaded;
 }
 
-usize Live2DSystem::reload_changed(scene::registry_t &registry) {
+usize Live2DSystem::reload_changed(scene::registry_t &registry,
+                                   const bool force) {
   usize loaded = 0;
   registry.view<const Live2DModel, Live2DRuntime>().each(
       [&](const scene::Entity, const Live2DModel &model,
@@ -141,7 +142,7 @@ usize Live2DSystem::reload_changed(scene::registry_t &registry) {
         if (!runtime.ready() || runtime.loaded != model.model)
           return;
         const u64 changed = source_stamp(runtime.asset.dependencies());
-        if (changed == runtime.source_stamp)
+        if (!force && changed == runtime.source_stamp)
           return;
         // Observe this failed generation once. A subsequent editor save has a
         // different stamp and retries; the current runtime remains untouched.
@@ -150,9 +151,10 @@ usize Live2DSystem::reload_changed(scene::registry_t &registry) {
         ModelAsset fresh_asset;
         nx::string error;
         if (!load_model(model.model.view(), m_resolve, fresh_asset, error)) {
-          nx::logw("live2d: '{}' changed but its last valid generation remains: "
-                   "{}",
-                   model.model, error);
+          nx::logw(
+              "live2d: '{}' changed but its last valid generation remains: "
+              "{}",
+              model.model, error);
           return;
         }
 
@@ -218,10 +220,10 @@ usize Live2DSystem::update(scene::registry_t &registry,
     if (!runtime.ready() || runtime.loaded != model.model)
       return;
     f32 animation_speed = 1.f;
-    if (auto *controller =
-            registry.try_get<scene::AnimationGraphComponent>(e);
+    if (auto *controller = registry.try_get<scene::AnimationGraphComponent>(e);
         controller != nullptr && !controller->clip_set.valid()) {
-      const scene::AnimationGraph *const graph = assets.graph(controller->graph);
+      const scene::AnimationGraph *const graph =
+          assets.graph(controller->graph);
       if (graph != nullptr) {
         const auto duration = [&](const u32 slot, const u16, f32 &seconds) {
           const MotionRef motion =
@@ -277,8 +279,7 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
   registry.view<Live2DModel, Live2DRuntime, scene::WorldTransform2D>().each(
       [&](const scene::Entity, const Live2DModel &model, Live2DRuntime &runtime,
           const scene::WorldTransform2D &node) {
-        if (!model.visible || !runtime.ready() ||
-            runtime.loaded != model.model)
+        if (!model.visible || !runtime.ready() || runtime.loaded != model.model)
           return;
 
         ModelView emit_view;
@@ -304,8 +305,8 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
         const bool has_atlas_room =
             held_atlases <= m_mask_atlas_limit &&
             count <= m_mask_atlas_limit - nx::cast<u32>(held_atlases);
-        const bool has_byte_room =
-            mask_bytes <= m_mask_budget && required <= m_mask_budget - mask_bytes;
+        const bool has_byte_room = mask_bytes <= m_mask_budget &&
+                                   required <= m_mask_budget - mask_bytes;
         const bool can_mask = wants_masks && has_atlas_room && has_byte_room;
         if (wants_masks && !can_mask)
           ++over_budget;
@@ -334,9 +335,9 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
         }
 
         const bool mask_emitted = out.atlas_sizes.size() > atlas_count;
-        const usize appended = emit_model(
-            runtime.asset, emit_view, mask_emitted ? runtime.masks : NONE,
-            out.geometry, out.clips, atlas_base);
+        const usize appended = emit_model(runtime.asset, emit_view,
+                                          mask_emitted ? runtime.masks : NONE,
+                                          out.geometry, out.clips, atlas_base);
         if (appended == 0) {
           out.geometry.vertices.resize(model_vertices);
           out.geometry.indices.resize(model_indices);
@@ -373,33 +374,31 @@ usize Live2DSystem::on_low_memory(scene::registry_t &registry) {
           largest = nx::max(largest, runtime.masks.atlas_size());
       });
 
-  const u32 relevant = largest != 0
-                           ? nx::min(m_mask_resolution_limit, largest)
-                           : m_mask_resolution_limit;
-  m_mask_resolution_limit =
-      nx::max(MIN_MASK_RESOLUTION, relevant / 2u);
-  constexpr u64 smallest = u64{MIN_MASK_RESOLUTION} * MIN_MASK_RESOLUTION *
-                           MASK_TEXEL_BYTES;
+  const u32 relevant = largest != 0 ? nx::min(m_mask_resolution_limit, largest)
+                                    : m_mask_resolution_limit;
+  m_mask_resolution_limit = nx::max(MIN_MASK_RESOLUTION, relevant / 2u);
+  constexpr u64 smallest =
+      u64{MIN_MASK_RESOLUTION} * MIN_MASK_RESOLUTION * MASK_TEXEL_BYTES;
   m_mask_budget = nx::max(m_mask_budget / 2u, smallest);
   m_mask_atlas_limit = nx::max(m_mask_atlas_limit / 2u, 1u);
 
   usize reduced = 0;
-  registry.view<Live2DModel, Live2DRuntime>().each(
-      [&](const scene::Entity, const Live2DModel &model,
-          Live2DRuntime &runtime) {
-        if (!runtime.ready() || runtime.loaded != model.model ||
-            !runtime.masks.active())
-          return;
-        const u32 resolution = mask_resolution(model.mask_resolution);
-        if (runtime.masks.atlas_size() <= resolution)
-          return;
-        if (runtime.masks.build(runtime.asset, resolution, 1)) {
-          runtime.masks.update(runtime.asset);
-          ++reduced;
-        }
-      });
+  registry.view<Live2DModel, Live2DRuntime>().each([&](const scene::Entity,
+                                                       const Live2DModel &model,
+                                                       Live2DRuntime &runtime) {
+    if (!runtime.ready() || runtime.loaded != model.model ||
+        !runtime.masks.active())
+      return;
+    const u32 resolution = mask_resolution(model.mask_resolution);
+    if (runtime.masks.atlas_size() <= resolution)
+      return;
+    if (runtime.masks.build(runtime.asset, resolution, 1)) {
+      runtime.masks.update(runtime.asset);
+      ++reduced;
+    }
+  });
   m_budget_warned = false;
   return reduced;
 }
 
-}
+} // namespace nxm::live2d

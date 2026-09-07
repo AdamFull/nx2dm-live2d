@@ -53,6 +53,51 @@ struct TestDevice {
   });
 }
 
+struct TestPipelines {
+  rhi::PipelineHandle mask;
+  rhi::PipelineHandle models[nx::cast<usize>(r2d::MeshBlend::Count)] = {};
+
+  [[nodiscard]] bool init(rhi::Device &device, const rhi::ShaderHandle shader,
+                          const rhi::Format format) {
+    mask = device.create_graphics_pipeline({
+        .name = "live2d mask test",
+        .vertex = {.shader = shader, .entry_point = "mask_vs"},
+        .fragment = {.shader = shader, .entry_point = "mask_fs"},
+        .color_formats = {rhi::Format::RGBA8_UNORM},
+        .color_count = 1,
+        .blend = {{.enabled = true,
+                   .mode = rhi::BlendMode::PremultipliedAdditive}},
+    });
+    if (!mask.valid())
+      return false;
+    for (usize i = 0; i < nx::array_size(models); ++i) {
+      models[i] = device.create_graphics_pipeline({
+          .name = "live2d model test",
+          .vertex = {.shader = shader, .entry_point = "model_vs"},
+          .fragment = {.shader = shader, .entry_point = "model_fs"},
+          .color_formats = {format},
+          .color_count = 1,
+          .blend = {{.enabled = true,
+                     .mode = pipeline_blend(nx::cast<r2d::MeshBlend>(i))}},
+      });
+      if (!models[i].valid())
+        return false;
+    }
+    return true;
+  }
+
+  void shutdown(rhi::Device &device) noexcept {
+    for (const rhi::PipelineHandle pipeline : models)
+      if (pipeline.valid())
+        device.destroy_pipeline(pipeline);
+    if (mask.valid())
+      device.destroy_pipeline(mask);
+    mask = {};
+    for (rhi::PipelineHandle &pipeline : models)
+      pipeline = {};
+  }
+};
+
 [[nodiscard]] usize lit(const nx::vector<u8> &pixels) noexcept {
   usize n = 0;
   for (usize i = 0; i < nx::cast<usize>(TARGET) * TARGET; ++i)
@@ -61,7 +106,7 @@ struct TestDevice {
   return n;
 }
 
-}
+} // namespace
 
 TEST_CASE("live2d: the renderer draws a masked model through the graph") {
   NX_REQUIRE_FIXTURE();
@@ -82,7 +127,11 @@ TEST_CASE("live2d: the renderer draws a masked model through the graph") {
   REQUIRE(sampler.valid());
 
   ModelRenderer renderer;
-  REQUIRE(renderer.init(device, shader, device.sampler_index(sampler)));
+  REQUIRE(renderer.init(device, device.sampler_index(sampler)));
+  TestPipelines pipelines;
+  REQUIRE(pipelines.init(device, shader, rhi::Format::RGBA8_UNORM));
+  renderer.set_pipelines(pipelines.mask, pipelines.models,
+                         rhi::Format::RGBA8_UNORM);
   CHECK(renderer.ready());
 
   nx::vfs::initialize();
@@ -179,7 +228,9 @@ TEST_CASE("live2d: the renderer draws a masked model through the graph") {
   CHECK(covered < (TARGET * TARGET * 4) / 5);
 
   graph.shutdown();
-  renderer.shutdown(device);
+  renderer.shutdown();
+  pipelines.shutdown(device);
+  device.destroy_shader(shader);
   device.destroy_texture(target);
   device.destroy_buffer(cameras);
   asset = ModelAsset();
@@ -197,7 +248,7 @@ TEST_CASE("live2d: a renderer with nothing to draw records no passes") {
     SKIP("the module's shaders are not built in this configuration");
 
   ModelRenderer renderer;
-  REQUIRE(renderer.init(device, shader, 0));
+  REQUIRE(renderer.init(device, 0));
 
   rg::RenderGraph graph;
   REQUIRE(graph.init(&device));
@@ -208,7 +259,8 @@ TEST_CASE("live2d: a renderer with nothing to draw records no passes") {
   CHECK(graph.pass_count() == 0u);
 
   graph.shutdown();
-  renderer.shutdown(device);
+  renderer.shutdown();
+  device.destroy_shader(shader);
 }
 
 TEST_CASE("live2d: the renderer records every mask atlas") {
@@ -222,7 +274,11 @@ TEST_CASE("live2d: the renderer records every mask atlas") {
     SKIP("the module's shaders are not built in this configuration");
 
   ModelRenderer renderer;
-  REQUIRE(renderer.init(device, shader, 0));
+  REQUIRE(renderer.init(device, 0));
+  TestPipelines pipelines;
+  REQUIRE(pipelines.init(device, shader, rhi::Format::RGBA8_UNORM));
+  renderer.set_pipelines(pipelines.mask, pipelines.models,
+                         rhi::Format::RGBA8_UNORM);
 
   Frame frame;
   frame.geometry.vertices = {
@@ -254,5 +310,7 @@ TEST_CASE("live2d: the renderer records every mask atlas") {
   CHECK(graph.pass_count() == 3u);
 
   graph.shutdown();
-  renderer.shutdown(device);
+  renderer.shutdown();
+  pipelines.shutdown(device);
+  device.destroy_shader(shader);
 }

@@ -3,6 +3,7 @@
 #include "live2d/live2d_scripting.h"
 #include "live2d/live2d_system.h"
 
+#include "core/app/async_texture_set.h"
 #include "core/app/engine.h"
 #include "core/app/module.h"
 #include "core/scene/scene_json.h"
@@ -45,8 +46,9 @@ public:
                                               u64{4} << 20, u64{32} << 20)
                                   : u64{16} << 20;
     m_system.set_mask_limits(max_mask_resolution, memory_budget);
-    m_system.set_resolver(TextureResolver([&ctx](const nx::string_view path) {
-      const nxe::rhi::TextureHandle texture = ctx.load_texture(path);
+    m_system.set_resolver(TextureResolver([this,
+                                           &ctx](const nx::string_view path) {
+      const nxe::rhi::TextureHandle texture = m_textures.resolve(ctx, path);
       if (!texture.valid())
         return pack_texture(NX_TEXTURE_NONE, 0);
       return pack_texture(ctx.device().texture_index(texture),
@@ -84,6 +86,8 @@ public:
     ctx.schedule().define(
         LOAD_SYSTEM,
         nxe::sys::SystemFn([this, &ctx](const nxe::sys::Context &c) {
+          if (m_textures.pump(ctx) != 0)
+            (void)m_system.reload_changed(ctx.scene().registry(), true);
           (void)m_system.load_pending(ctx.scene().registry(), c.dt);
         }));
     ctx.schedule().add(nxe::sys::Stage::Update, LOAD_SYSTEM);
@@ -144,12 +148,13 @@ public:
 
   void on_detach(nxe::ModuleContext &ctx) override {
     reset_pipelines(ctx);
-    m_renderer.shutdown(ctx.device());
+    m_renderer.shutdown();
     m_sampler = 0;
   }
 
-  void on_unregister(nxe::ModuleContext &) override {
+  void on_unregister(nxe::ModuleContext &ctx) override {
     m_system.set_resolver({});
+    m_textures.release_all(ctx);
     uninstall_platform();
   }
 
@@ -165,8 +170,7 @@ private:
   void reset_pipelines(nxe::ModuleContext &ctx) {
     const nxe::rhi::PipelineHandle
         empty[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
-    m_renderer.set_pipelines(ctx.device(), {}, empty,
-                             nxe::rhi::Format::Unknown);
+    m_renderer.set_pipelines({}, empty, nxe::rhi::Format::Unknown);
     if (m_mask_request.valid())
       (void)ctx.release_pipeline_load(m_mask_request);
     m_mask_request = {};
@@ -218,11 +222,12 @@ private:
       if (!models[i].valid())
         return;
     }
-    m_renderer.set_pipelines(ctx.device(), mask, models, format);
+    m_renderer.set_pipelines(mask, models, format);
   }
 
   ModelRenderer m_renderer;
   Live2DSystem m_system;
+  nxe::AsyncTextureSet m_textures;
   nxe::PipelineLoadRequest m_mask_request;
   nxe::PipelineLoadRequest
       m_model_requests[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};

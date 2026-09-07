@@ -29,7 +29,7 @@ public:
   usize load_pending(nxe::scene::registry_t &registry, f32 dt = 0.f);
   /// Reloads changed model bundles/subresources without dropping the last
   /// valid pose when a new generation is malformed.
-  usize reload_changed(nxe::scene::registry_t &registry);
+  usize reload_changed(nxe::scene::registry_t &registry, bool force = false);
 
   usize update(nxe::scene::registry_t &registry,
                const nxe::scene::AssetRegistry &assets, f32 dt);
@@ -70,4 +70,4 @@ private:
   bool m_budget_warned = false;
 };
 
-}
+} // namespace nxm::live2d

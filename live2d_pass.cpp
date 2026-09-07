@@ -46,20 +46,6 @@ void put_affine(PushBlock &push, const glm::mat3 &m) noexcept {
 
 } // namespace
 
-bool ModelRenderer::init(rhi::Device &device, const rhi::ShaderHandle shader,
-                         const u32 sampler) {
-  if (!shader.valid()) {
-    nx::loge("live2d: no shader; the model will not draw");
-    return false;
-  }
-  if (!init(device, sampler)) {
-    device.destroy_shader(shader);
-    return false;
-  }
-  m_shader = shader;
-  return true;
-}
-
 bool ModelRenderer::init(rhi::Device &device, const u32 sampler) {
   static constexpr nx::string_view ARRAYS[] = {
       "live2d vertices", "live2d indices", "live2d mask vertices",
@@ -72,106 +58,24 @@ bool ModelRenderer::init(rhi::Device &device, const u32 sampler) {
   return true;
 }
 
-bool ModelRenderer::reload_shader(rhi::Device &device,
-                                  const rhi::ShaderHandle shader) {
-  if (!shader.valid())
-    return false;
-  for (rhi::PipelineHandle &pipeline : m_model_pipeline) {
-    if (m_owns_pipelines && pipeline.valid())
-      device.destroy_pipeline(pipeline);
+void ModelRenderer::shutdown() {
+  for (rhi::PipelineHandle &pipeline : m_model_pipeline)
     pipeline = {};
-  }
-  if (m_owns_pipelines && m_mask_pipeline.valid())
-    device.destroy_pipeline(m_mask_pipeline);
   m_mask_pipeline = {};
-  if (m_shader.valid())
-    device.destroy_shader(m_shader);
-  m_shader = shader;
-  m_owns_pipelines = false;
   m_format = rhi::Format::Unknown;
-  return true;
-}
-
-void ModelRenderer::shutdown(rhi::Device &device) {
-  for (rhi::PipelineHandle &pipeline : m_model_pipeline) {
-    if (m_owns_pipelines && pipeline.valid())
-      device.destroy_pipeline(pipeline);
-    pipeline = {};
-  }
-  if (m_owns_pipelines && m_mask_pipeline.valid())
-    device.destroy_pipeline(m_mask_pipeline);
-  m_mask_pipeline = {};
-  if (m_shader.valid())
-    device.destroy_shader(m_shader);
-  m_shader = {};
-  m_format = rhi::Format::Unknown;
-  m_owns_pipelines = false;
   m_ring.shutdown();
 }
 
 void ModelRenderer::set_pipelines(
-    rhi::Device &device, const rhi::PipelineHandle mask,
+    const rhi::PipelineHandle mask,
     const std::span<const rhi::PipelineHandle,
                     nx::cast<usize>(r2d::MeshBlend::Count)>
         models,
     const rhi::Format format) {
-  if (m_owns_pipelines) {
-    for (const rhi::PipelineHandle pipeline : m_model_pipeline)
-      if (pipeline.valid())
-        device.destroy_pipeline(pipeline);
-    if (m_mask_pipeline.valid())
-      device.destroy_pipeline(m_mask_pipeline);
-  }
   m_mask_pipeline = mask;
   for (usize i = 0; i < models.size(); ++i)
     m_model_pipeline[i] = models[i];
   m_format = format;
-  m_owns_pipelines = false;
-}
-
-bool ModelRenderer::ensure_pipelines(rhi::Device &device,
-                                     const rhi::Format format) {
-  if (format == m_format && m_mask_pipeline.valid())
-    return true;
-
-  for (rhi::PipelineHandle &pipeline : m_model_pipeline) {
-    if (m_owns_pipelines && pipeline.valid())
-      device.destroy_pipeline(pipeline);
-    pipeline = {};
-  }
-  if (m_owns_pipelines && m_mask_pipeline.valid())
-    device.destroy_pipeline(m_mask_pipeline);
-  m_owns_pipelines = true;
-
-  // The atlas is always RGBA8 whatever the scene is: it holds four masks, not
-  // a picture, and eight bits of coverage is what Cubism's own renderers use.
-  m_mask_pipeline = device.create_graphics_pipeline({
-      .name = "live2d mask",
-      .vertex = {.shader = m_shader, .entry_point = "mask_vs"},
-      .fragment = {.shader = m_shader, .entry_point = "mask_fs"},
-      .color_formats = {rhi::Format::RGBA8_UNORM},
-      .color_count = 1,
-      .blend = {{.enabled = true,
-                 .mode = rhi::BlendMode::PremultipliedAdditive}},
-  });
-  if (!m_mask_pipeline.valid())
-    return false;
-
-  for (usize i = 0; i < nx::cast<usize>(r2d::MeshBlend::Count); ++i) {
-    m_model_pipeline[i] = device.create_graphics_pipeline({
-        .name = "live2d model",
-        .vertex = {.shader = m_shader, .entry_point = "model_vs"},
-        .fragment = {.shader = m_shader, .entry_point = "model_fs"},
-        .color_formats = {format},
-        .color_count = 1,
-        .blend = {{.enabled = true,
-                   .mode = pipeline_blend(nx::cast<r2d::MeshBlend>(i))}},
-    });
-    if (!m_model_pipeline[i].valid())
-      return false;
-  }
-  m_format = format;
-  return true;
 }
 
 void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
@@ -179,7 +83,7 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
                          const u64 cameras, const Frame &frame) {
   if (frame.empty() || !ready() || !target.valid())
     return;
-  if (!ensure_pipelines(device, format))
+  if (format != m_format)
     return;
 
   m_ring.next_frame();

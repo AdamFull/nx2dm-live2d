@@ -51,33 +51,22 @@ public:
   ModelRenderer(const ModelRenderer &) = delete;
   ModelRenderer &operator=(const ModelRenderer &) = delete;
 
-  [[nodiscard]] bool init(nxe::rhi::Device &device,
-                          nxe::rhi::ShaderHandle shader, u32 sampler);
   [[nodiscard]] bool init(nxe::rhi::Device &device, u32 sampler);
-  /// Swaps only the validated shader generation. Model state, mask layouts,
-  /// and upload-ring allocations remain live; pipelines rebuild lazily.
-  [[nodiscard]] bool reload_shader(nxe::rhi::Device &device,
-                                   nxe::rhi::ShaderHandle shader);
-  void shutdown(nxe::rhi::Device &device);
+  void shutdown();
 
-  void set_pipelines(nxe::rhi::Device &device, nxe::rhi::PipelineHandle mask,
+  void set_pipelines(nxe::rhi::PipelineHandle mask,
                      std::span<const nxe::rhi::PipelineHandle,
                                nx::cast<usize>(nxe::r2d::MeshBlend::Count)>
                          models,
                      nxe::rhi::Format format);
 
-  [[nodiscard]] bool ready() const noexcept {
-    return m_shader.valid() || m_mask_pipeline.valid();
-  }
+  [[nodiscard]] bool ready() const noexcept { return m_mask_pipeline.valid(); }
 
   void draw(nxe::rhi::Device &device, nxe::rg::RenderGraph &graph,
             nxe::rg::TextureId target, nxe::rhi::Format format, u64 cameras,
             const Frame &frame);
 
 private:
-  [[nodiscard]] bool ensure_pipelines(nxe::rhi::Device &device,
-                                      nxe::rhi::Format format);
-
   enum Array : u32 {
     MODEL_VERTICES,
     MODEL_INDICES,
@@ -87,13 +76,11 @@ private:
   };
 
   nxe::rhi::UploadRing m_ring;
-  nxe::rhi::ShaderHandle m_shader;
   nxe::rhi::PipelineHandle m_mask_pipeline;
   nxe::rhi::PipelineHandle
       m_model_pipeline[nx::cast<usize>(nxe::r2d::MeshBlend::Count)];
   nxe::rhi::Format m_format = nxe::rhi::Format::Unknown;
   u32 m_sampler = 0;
-  bool m_owns_pipelines = false;
 };
 
 } // namespace nxm::live2d
