@@ -6,6 +6,9 @@
 
 namespace nxm::live2d {
 
+[[nodiscard]] nxe::rhi::BlendMode
+pipeline_blend(nxe::r2d::MeshBlend blend) noexcept;
+
 struct Frame {
   nxe::r2d::MeshChannel geometry;
   nx::vector<DrawMask> clips;
@@ -50,13 +53,22 @@ public:
 
   [[nodiscard]] bool init(nxe::rhi::Device &device,
                           nxe::rhi::ShaderHandle shader, u32 sampler);
+  [[nodiscard]] bool init(nxe::rhi::Device &device, u32 sampler);
   /// Swaps only the validated shader generation. Model state, mask layouts,
   /// and upload-ring allocations remain live; pipelines rebuild lazily.
   [[nodiscard]] bool reload_shader(nxe::rhi::Device &device,
                                    nxe::rhi::ShaderHandle shader);
   void shutdown(nxe::rhi::Device &device);
 
-  [[nodiscard]] bool ready() const noexcept { return m_shader.valid(); }
+  void set_pipelines(nxe::rhi::Device &device, nxe::rhi::PipelineHandle mask,
+                     std::span<const nxe::rhi::PipelineHandle,
+                               nx::cast<usize>(nxe::r2d::MeshBlend::Count)>
+                         models,
+                     nxe::rhi::Format format);
+
+  [[nodiscard]] bool ready() const noexcept {
+    return m_shader.valid() || m_mask_pipeline.valid();
+  }
 
   void draw(nxe::rhi::Device &device, nxe::rg::RenderGraph &graph,
             nxe::rg::TextureId target, nxe::rhi::Format format, u64 cameras,
@@ -81,6 +93,7 @@ private:
       m_model_pipeline[nx::cast<usize>(nxe::r2d::MeshBlend::Count)];
   nxe::rhi::Format m_format = nxe::rhi::Format::Unknown;
   u32 m_sampler = 0;
+  bool m_owns_pipelines = false;
 };
 
-}
+} // namespace nxm::live2d

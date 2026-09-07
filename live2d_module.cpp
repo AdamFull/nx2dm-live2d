@@ -73,26 +73,13 @@ public:
     (void)m_system.reload_changed(ctx.scene().registry());
     if (!ctx.shader_reloaded(SHADER))
       return;
-    const nxe::rhi::ShaderHandle shader = ctx.load_shader(SHADER);
-    if (!shader.valid()) {
-      nx::logw(
-          "live2d: changed shader is invalid; keeping the last generation");
-      return;
-    }
-    const bool loaded =
-        m_renderer.ready()
-            ? m_renderer.reload_shader(ctx.device(), shader)
-            : m_renderer.init(ctx.device(), shader, m_sampler);
-    if (loaded)
-      nx::logd("live2d: renderer shader reloaded");
+    reset_pipelines(ctx);
   }
 
   bool on_attach(nxe::ModuleContext &ctx) override {
     m_sampler = ctx.samplers().index(nxe::scene::sampler_bilinear());
-    const bool can_draw = m_renderer.init(ctx.device(), ctx.load_shader(SHADER),
-                                          m_sampler);
-    if (!can_draw)
-      nx::logw("live2d: no renderer; models will load and pose but not draw");
+    if (!m_renderer.init(ctx.device(), m_sampler))
+      nx::logw("live2d: no upload ring; models will not draw");
 
     ctx.schedule().define(
         LOAD_SYSTEM,
@@ -139,6 +126,7 @@ public:
               ctx.config().scene_format == nxe::rhi::Format::Unknown
                   ? ctx.device().swapchain_format()
                   : ctx.config().scene_format;
+          ensure_pipelines(ctx, format);
           m_renderer.draw(ctx.device(), graph,
                           context.target(nxe::TARGET_SCENE_COLOR), format,
                           context.scene_push.cameras, *frame);
@@ -155,6 +143,7 @@ public:
   }
 
   void on_detach(nxe::ModuleContext &ctx) override {
+    reset_pipelines(ctx);
     m_renderer.shutdown(ctx.device());
     m_sampler = 0;
   }
@@ -173,12 +162,75 @@ public:
   }
 
 private:
+  void reset_pipelines(nxe::ModuleContext &ctx) {
+    const nxe::rhi::PipelineHandle
+        empty[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
+    m_renderer.set_pipelines(ctx.device(), {}, empty,
+                             nxe::rhi::Format::Unknown);
+    if (m_mask_request.valid())
+      (void)ctx.release_pipeline_load(m_mask_request);
+    m_mask_request = {};
+    for (nxe::PipelineLoadRequest &request : m_model_requests) {
+      if (request.valid())
+        (void)ctx.release_pipeline_load(request);
+      request = {};
+    }
+    m_pipeline_format = nxe::rhi::Format::Unknown;
+  }
+
+  void ensure_pipelines(nxe::ModuleContext &ctx,
+                        const nxe::rhi::Format format) {
+    if (m_pipeline_format != format)
+      reset_pipelines(ctx);
+    m_pipeline_format = format;
+    if (!m_mask_request.valid()) {
+      nxe::rhi::GraphicsPipelineDesc desc;
+      desc.name = "live2d mask";
+      desc.vertex.entry_point = "mask_vs";
+      desc.fragment.entry_point = "mask_fs";
+      desc.color_formats[0] = nxe::rhi::Format::RGBA8_UNORM;
+      desc.color_count = 1;
+      desc.blend[0] = {.enabled = true,
+                       .mode = nxe::rhi::BlendMode::PremultipliedAdditive};
+      m_mask_request = ctx.load_graphics_pipeline_async(SHADER, desc);
+    }
+    for (usize i = 0; i < nx::array_size(m_model_requests); ++i) {
+      if (m_model_requests[i].valid())
+        continue;
+      nxe::rhi::GraphicsPipelineDesc desc;
+      desc.name = "live2d model";
+      desc.vertex.entry_point = "model_vs";
+      desc.fragment.entry_point = "model_fs";
+      desc.color_formats[0] = format;
+      desc.color_count = 1;
+      desc.blend[0] = {.enabled = true,
+                       .mode =
+                           pipeline_blend(nx::cast<nxe::r2d::MeshBlend>(i))};
+      m_model_requests[i] = ctx.load_graphics_pipeline_async(SHADER, desc);
+    }
+    const nxe::rhi::PipelineHandle mask = ctx.loaded_pipeline(m_mask_request);
+    nxe::rhi::PipelineHandle
+        models[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
+    if (!mask.valid())
+      return;
+    for (usize i = 0; i < nx::array_size(models); ++i) {
+      models[i] = ctx.loaded_pipeline(m_model_requests[i]);
+      if (!models[i].valid())
+        return;
+    }
+    m_renderer.set_pipelines(ctx.device(), mask, models, format);
+  }
+
   ModelRenderer m_renderer;
   Live2DSystem m_system;
+  nxe::PipelineLoadRequest m_mask_request;
+  nxe::PipelineLoadRequest
+      m_model_requests[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
+  nxe::rhi::Format m_pipeline_format = nxe::rhi::Format::Unknown;
   u32 m_sampler = 0;
 };
 
-}
-}
+} // namespace
+} // namespace nxm::live2d
 
 NX_DECLARE_MODULE(live2d, nxm::live2d::Live2DModule)
