@@ -11,15 +11,15 @@ struct Live2DPush {
 
     float4 tile;
 
-    GpuPtr<GpuCamera2D> cameras;
-    GpuPtr<GuiVertex> vertices;
+    NxPtr<GpuCamera2D> cameras;
+    NxPtr<GuiVertex> vertices;
     uint* indices;
 
     uint index_offset;
     uint vertex_offset;
-    uint texture;
+    NxTexture2D<float4> texture;
     uint camera;
-    uint mask_texture;
+    NxTexture2D<float4> mask_texture;
     uint inverted;
 };
 
@@ -64,7 +64,7 @@ float4 mask_fs(MaskOutput input): SV_Target {
                          step(input.clip.x, pc.tile.z) *
                          step(input.clip.y, pc.tile.w);
 
-    const float coverage = nx_sample_packed(pc.texture, input.uv).a * inside;
+    const float coverage = pc.texture.sample_color(input.uv).a * inside;
 
     // Additive, so two shapes in one group union rather than the later one
     // replacing the earlier. Channels do not interfere because only one
@@ -88,12 +88,12 @@ ModelOutput model_vs(uint vertex_id: SV_VertexID) {
 
 [shader("fragment")]
 float4 model_fs(ModelOutput input): SV_Target {
-    float4 result = input.color * nx_sample_packed(pc.texture, input.uv);
-    if ((pc.mask_texture >> 16) == kTextureNone)
+    float4 result = input.color * pc.texture.sample_color(input.uv);
+    if (!pc.mask_texture.is_valid())
         return result;
 
-    float coverage = saturate(dot(nx_sample_packed(pc.mask_texture, input.mask_uv),
-                                  pc.channel));
+    float coverage = saturate(
+        dot(pc.mask_texture.sample_color(input.mask_uv), pc.channel));
     if (pc.inverted != 0u)
         coverage = 1.0 - coverage;
     result.a *= coverage;
