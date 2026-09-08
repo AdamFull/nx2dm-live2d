@@ -11,9 +11,9 @@ struct Live2DPush {
 
     float4 tile;
 
-    ConstBufferPointer<GpuCamera2D> cameras;
-    ConstBufferPointer<GuiVertex> vertices;
-    ConstBufferPointer<uint> indices;
+    GpuPtr<GpuCamera2D> cameras;
+    GpuPtr<GuiVertex> vertices;
+    uint* indices;
 
     uint index_offset;
     uint vertex_offset;
