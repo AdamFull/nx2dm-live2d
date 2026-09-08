@@ -36,9 +36,9 @@ struct Live2DPush {
   u64 indices = 0;
   u32 index_offset = 0;
   u32 vertex_offset = 0;
-  u32 texture = 0;
+  NxTexture2D<float4> texture{};
   u32 camera = 0;
-  u32 mask_texture = 0;
+  NxTexture2D<float4> mask_texture{};
   u32 inverted = 0;
 };
 static_assert(sizeof(Live2DPush) == 112);
@@ -112,7 +112,7 @@ void put_affine(Live2DPush &push, const glm::mat3 &m) noexcept {
   return n;
 }
 
-}
+} // namespace
 
 TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
           "rest") {
@@ -282,7 +282,7 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
       push.indices = device.buffer_address(mask_indices);
       push.index_offset = draw.first_index;
       push.vertex_offset = draw.vertex_offset;
-      push.texture = draw.texture;
+      push.texture = nx_texture_2d<float4>(draw.texture);
       cmd.push_constants(&push, sizeof(push));
       cmd.draw(draw.index_count);
     }
@@ -317,10 +317,10 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
       push.indices = device.buffer_address(model_indices);
       push.index_offset = draw.first_index;
       push.vertex_offset = draw.vertex_offset;
-      push.texture = draw.texture;
+      push.texture = nx_texture_2d<float4>(draw.texture);
       push.camera = draw.camera;
-      push.mask_texture =
-          pass == Unclipped ? pack_texture(NX_TEXTURE_NONE, 0) : atlas_packed;
+      push.mask_texture = nx_texture_2d<float4>(
+          pass == Unclipped ? pack_texture(NX_TEXTURE_NONE, 0) : atlas_packed);
       push.inverted = pass == Inverted ? 1u : 0u;
       cmd.push_constants(&push, sizeof(push));
       cmd.draw(draw.index_count);

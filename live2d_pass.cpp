@@ -148,7 +148,7 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
                          push.indices = mask_indices;
                          push.index_offset = draw.first_index;
                          push.vertex_offset = draw.vertex_offset;
-                         push.texture = draw.texture;
+                         push.texture = nx_texture_2d<float4>(draw.texture);
                          cmd.push_constants(&push, sizeof(push));
                          cmd.draw(draw.index_count);
                        }
@@ -189,12 +189,13 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
           push.indices = indices;
           push.index_offset = draw.first_index;
           push.vertex_offset = draw.vertex_offset;
-          push.texture = draw.texture;
+          push.texture = nx_texture_2d<float4>(draw.texture);
           push.camera = draw.camera;
           const bool clipped = clip.clipped() && nx::cast<usize>(clip.atlas) <
                                                      mask_textures.size();
-          push.mask_texture = clipped ? mask_textures[clip.atlas]
-                                      : pack_texture(NX_TEXTURE_NONE, 0);
+          push.mask_texture =
+              nx_texture_2d<float4>(clipped ? mask_textures[clip.atlas]
+                                            : pack_texture(NX_TEXTURE_NONE, 0));
           push.inverted = clipped && clip.inverted ? 1u : 0u;
           cmd.push_constants(&push, sizeof(push));
           cmd.draw(draw.index_count);

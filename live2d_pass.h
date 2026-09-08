@@ -35,9 +35,9 @@ struct PushBlock {
   u64 indices = 0;
   u32 index_offset = 0;
   u32 vertex_offset = 0;
-  u32 texture = 0;
+  NxTexture2D<float4> texture{};
   u32 camera = 0;
-  u32 mask_texture = 0;
+  NxTexture2D<float4> mask_texture{};
   u32 inverted = 0;
 };
 static_assert(sizeof(PushBlock) <= nxe::rhi::PUSH_CONSTANT_SIZE,

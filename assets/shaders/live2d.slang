@@ -1,5 +1,5 @@
 
-import bindless;
+import nx_core;
 import atlas;
 import interop;
 

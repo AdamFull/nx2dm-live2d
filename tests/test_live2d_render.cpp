@@ -101,9 +101,9 @@ void shrink(rhi::ImageData &image, const u32 max_side) {
   u8 *const p = image.pixels.data();
   for (u32 y = 0; y < h; ++y)
     for (u32 x = 0; x < w; ++x) {
-      const usize from =
-          (nx::cast<usize>(y) * step * image.width + nx::cast<usize>(x) * step) *
-          4;
+      const usize from = (nx::cast<usize>(y) * step * image.width +
+                          nx::cast<usize>(x) * step) *
+                         4;
       const usize to = (nx::cast<usize>(y) * w + x) * 4;
       std::memcpy(p + to, p + from, 4);
     }
@@ -132,7 +132,7 @@ void dump(const u8 *const pixels, const u32 pass) {
                        nx::cast<int>(TARGET) * 4);
 }
 
-}
+} // namespace
 
 TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
           "what is on it") {
@@ -247,7 +247,7 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
     for (const r2d::MeshDraw &draw : channel.draws) {
       push.fields.index_offset = draw.first_index;
       push.fields.vertex_offset = draw.vertex_offset;
-      push.fields.texture = draw.texture;
+      push.fields.texture = nx_texture_2d<float4>(draw.texture);
       push.fields.camera = draw.camera;
       cmd.push_constants(&push, sizeof(push));
       cmd.draw(draw.index_count);
@@ -431,8 +431,8 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
     for (const r2d::MeshDraw &draw : channel.draws) {
       push.fields.index_offset = draw.first_index;
       push.fields.vertex_offset = draw.vertex_offset;
-      push.fields.texture = pass == Pages ? draw.texture
-                                          : pack_texture(NX_TEXTURE_NONE, 0);
+      push.fields.texture = nx_texture_2d<float4>(
+          pass == Pages ? draw.texture : pack_texture(NX_TEXTURE_NONE, 0));
       push.fields.camera = draw.camera;
       cmd.push_constants(&push, sizeof(push));
       cmd.draw(draw.index_count);
