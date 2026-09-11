@@ -17,13 +17,10 @@ set(NX_LIVE2D_CORE_DIR "" CACHE PATH
 set(NX_LIVE2D_SDK_VERSION "5-r.5")
 
 function(_nx_live2d_resolve_core root out_var)
-    foreach (candidate "${root}/CubismCore" "${root}/Core" "${root}/CubismSdkForNative/Core" "${root}")
-        if (EXISTS "${candidate}/include/Live2DCubismCore.h")
-            set(${out_var} "${candidate}" PARENT_SCOPE)
-            return()
-        endif ()
-    endforeach ()
-    set(${out_var} "" PARENT_SCOPE)
+    _nx_resolve_vendor_root(
+            "${root}/CubismCore;${root}/Core;${root}/CubismSdkForNative/Core;${root}"
+            "include/Live2DCubismCore.h" _resolved)
+    set(${out_var} "${_resolved}" PARENT_SCOPE)
 endfunction()
 
 function(nx_add_live2d)
