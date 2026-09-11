@@ -9,8 +9,7 @@
 # so it stays a required local, gitignored, developer-provided directory.
 
 set(NX_LIVE2D_CORE_DIR "" CACHE PATH
-        "An extracted Cubism Core (Core/include/Live2DCubismCore.h, or that "
-        "directory itself). Empty uses modules/live2d/third_party/CubismCore.")
+        "An extracted Cubism Core (Core/include/Live2DCubismCore.h, or that directory itself). Empty uses modules/live2d/third_party/CubismCore.")
 
 # The exact release this was written against. A mismatch is not fatal - the
 # Core ABI is stable across a release line - but it is worth saying out loud
@@ -18,7 +17,7 @@ set(NX_LIVE2D_CORE_DIR "" CACHE PATH
 set(NX_LIVE2D_SDK_VERSION "5-r.5")
 
 function(_nx_live2d_resolve_core root out_var)
-    foreach (candidate "${root}/Core" "${root}/CubismSdkForNative/Core" "${root}")
+    foreach (candidate "${root}/CubismCore" "${root}/Core" "${root}/CubismSdkForNative/Core" "${root}")
         if (EXISTS "${candidate}/include/Live2DCubismCore.h")
             set(${out_var} "${candidate}" PARENT_SCOPE)
             return()
