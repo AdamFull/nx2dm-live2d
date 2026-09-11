@@ -1,15 +1,25 @@
 
-set(NX_LIVE2D_SDK_DIR "" CACHE PATH
-        "An extracted CubismSdkForNative. Empty uses modules/live2d/third_party.")
+# Cubism ships in two parts under separate licenses, and only one of them can
+# live in this repo. The Framework (Live2D Open Software License) is plain
+# C++ source hosted at github.com/Live2D/CubismNativeFramework, so it is a
+# normal pinned git submodule - see third_party/CubismNativeFramework. The
+# Core (Live2D Proprietary Software License) is a prebuilt binary Live2D
+# distributes only behind a licence-acceptance click-through on their own
+# site, with no fetchable URL; it can never be committed or auto-downloaded,
+# so it stays a required local, gitignored, developer-provided directory.
 
-# The exact archive this was written against. A mismatch is not fatal - the
+set(NX_LIVE2D_CORE_DIR "" CACHE PATH
+        "An extracted Cubism Core (Core/include/Live2DCubismCore.h, or that "
+        "directory itself). Empty uses modules/live2d/third_party/CubismCore.")
+
+# The exact release this was written against. A mismatch is not fatal - the
 # Core ABI is stable across a release line - but it is worth saying out loud
 # when a build is not using what anybody tested.
 set(NX_LIVE2D_SDK_VERSION "5-r.5")
 
-function(_nx_live2d_resolve root out_var)
-    foreach (candidate "${root}/CubismSdkForNative" "${root}")
-        if (EXISTS "${candidate}/Core/include/Live2DCubismCore.h")
+function(_nx_live2d_resolve_core root out_var)
+    foreach (candidate "${root}/Core" "${root}/CubismSdkForNative/Core" "${root}")
+        if (EXISTS "${candidate}/include/Live2DCubismCore.h")
             set(${out_var} "${candidate}" PARENT_SCOPE)
             return()
         endif ()
@@ -20,8 +30,8 @@ endfunction()
 # Which Core binary this build links. Two outputs because Windows ships a
 # separate debug import library and iOS a separate debug slice; everywhere else
 # both come back the same.
-function(_nx_live2d_core_paths sdk out_debug out_release)
-    set(_lib "${sdk}/Core/lib")
+function(_nx_live2d_core_paths core out_debug out_release)
+    set(_lib "${core}/lib")
 
     if (ANDROID)
         if (NOT EXISTS "${_lib}/android/${ANDROID_ABI}/libLive2DCubismCore.a")
@@ -105,44 +115,32 @@ function(_nx_live2d_core_paths sdk out_debug out_release)
 endfunction()
 
 function(nx_add_live2d)
-    if (NX_LIVE2D_SDK_DIR)
-        _nx_live2d_resolve("${NX_LIVE2D_SDK_DIR}" _sdk)
-        if (NOT _sdk)
+    if (NX_LIVE2D_CORE_DIR)
+        _nx_live2d_resolve_core("${NX_LIVE2D_CORE_DIR}" _core)
+        if (NOT _core)
             message(FATAL_ERROR
-                    "NX_LIVE2D_SDK_DIR='${NX_LIVE2D_SDK_DIR}' holds no Cubism SDK: "
-                    "expected Core/include/Live2DCubismCore.h there or under "
-                    "CubismSdkForNative/.")
+                    "NX_LIVE2D_CORE_DIR='${NX_LIVE2D_CORE_DIR}' holds no Cubism "
+                    "Core: expected include/Live2DCubismCore.h there, or under "
+                    "Core/ or CubismSdkForNative/Core/.")
         endif ()
     else ()
-        _nx_live2d_resolve("${CMAKE_CURRENT_LIST_DIR}/third_party" _sdk)
-        if (NOT _sdk)
+        _nx_live2d_resolve_core("${CMAKE_CURRENT_LIST_DIR}/third_party" _core)
+        if (NOT _core)
             message(FATAL_ERROR
-                    "nx2d: no Cubism SDK. Put one in modules/live2d/third_party or "
-                    "point NX_LIVE2D_SDK_DIR at an extracted CubismSdkForNative "
-                    "(${NX_LIVE2D_SDK_VERSION} is what this was written against). "
-                    "It is not fetchable: Live2D distributes it only behind their "
-                    "licence acceptance.")
+                    "nx2d: no Cubism Core. Download the Cubism SDK for Native "
+                    "(${NX_LIVE2D_SDK_VERSION}) from https://www.live2d.com/en/sdk/"
+                    "download/native/, then put its Core/ directory at "
+                    "modules/live2d/third_party/CubismCore (or point "
+                    "NX_LIVE2D_CORE_DIR at it). It is not fetchable here: Live2D "
+                    "distributes it only behind their licence acceptance. Never "
+                    "commit it - modules/live2d/third_party/CubismCore is "
+                    "gitignored on purpose.")
         endif ()
     endif ()
 
-    if (EXISTS "${_sdk}/cubism-info.yml")
-        file(STRINGS "${_sdk}/cubism-info.yml" _version REGEX "^version:")
-        string(REPLACE "version:" "" _version "${_version}")
-        string(STRIP "${_version}" _version)
-        if (_version AND NOT _version STREQUAL NX_LIVE2D_SDK_VERSION)
-            message(WARNING
-                    "nx2d: Cubism SDK ${_version}, tested against "
-                    "${NX_LIVE2D_SDK_VERSION}")
-        endif ()
-    endif ()
-
-    _nx_live2d_core_paths("${_sdk}" _core_debug _core_release)
+    _nx_live2d_core_paths("${_core}" _core_debug _core_release)
     if (NOT EXISTS "${_core_release}")
-        message(FATAL_ERROR
-                "nx2d: no Cubism Core binary at ${_core_release}. The SDK's static "
-                "libraries are gitignored by default - see the note in "
-                "docs/live2d.md - so a fresh clone has the sources and none of "
-                "the .a/.lib files.")
+        message(FATAL_ERROR "nx2d: no Cubism Core binary at ${_core_release}.")
     endif ()
     if (NOT EXISTS "${_core_debug}")
         set(_core_debug "${_core_release}")
@@ -157,9 +155,16 @@ function(nx_add_live2d)
             IMPORTED_LOCATION_RELEASE "${_core_release}"
             MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
             MAP_IMPORTED_CONFIG_MINSIZEREL Release
-            INTERFACE_INCLUDE_DIRECTORIES "${_sdk}/Core/include")
+            INTERFACE_INCLUDE_DIRECTORIES "${_core}/include")
 
-    set(_src "${_sdk}/Framework/src")
+    set(_framework "${CMAKE_CURRENT_LIST_DIR}/third_party/CubismNativeFramework")
+    if (NOT EXISTS "${_framework}/src/CubismFramework.cpp")
+        message(FATAL_ERROR
+                "nx2d: no Cubism Framework at ${_framework}. Run "
+                "'git submodule update --init -- modules/live2d/third_party/"
+                "CubismNativeFramework'.")
+    endif ()
+    set(_src "${_framework}/src")
     file(GLOB _framework_sources CONFIGURE_DEPENDS
             "${_src}/*.cpp"
             "${_src}/Effect/*.cpp"
@@ -184,6 +189,6 @@ function(nx_add_live2d)
     target_link_libraries(nx_live2d_framework PUBLIC nx::live2d_core)
     set_target_properties(nx_live2d_framework PROPERTIES FOLDER "third_party")
 
-    message(STATUS "nx2d: Live2D from ${_sdk}")
-    set(NX_LIVE2D_DIR "${_sdk}" CACHE INTERNAL "resolved Cubism SDK root")
+    message(STATUS "nx2d: Live2D Core from ${_core}, Framework from ${_framework}")
+    set(NX_LIVE2D_CORE_RESOLVED_DIR "${_core}" CACHE INTERNAL "resolved Cubism Core root")
 endfunction()

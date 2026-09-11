@@ -1,0 +1,5 @@
+# The Cubism Core: a prebuilt binary Live2D distributes only behind a licence
+# click-through on their own site, with no fetchable URL - it can never be
+# committed. Developer-provided locally; see NxLive2D.cmake.
+/third_party/CubismCore/
+/third_party/CubismSdkForNative/
