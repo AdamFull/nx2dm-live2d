@@ -26,93 +26,6 @@ function(_nx_live2d_resolve_core root out_var)
     set(${out_var} "" PARENT_SCOPE)
 endfunction()
 
-# Which Core binary this build links. Two outputs because Windows ships a
-# separate debug import library and iOS a separate debug slice; everywhere else
-# both come back the same.
-function(_nx_live2d_core_paths core out_debug out_release)
-    set(_lib "${core}/lib")
-
-    if (ANDROID)
-        if (NOT EXISTS "${_lib}/android/${ANDROID_ABI}/libLive2DCubismCore.a")
-            message(FATAL_ERROR
-                    "nx2d: Cubism Core has no ${ANDROID_ABI} slice; the SDK ships "
-                    "arm64-v8a, x86 and x86_64 only.")
-        endif ()
-        set(_both "${_lib}/android/${ANDROID_ABI}/libLive2DCubismCore.a")
-
-    elseif (IOS)
-        if (CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
-            list(GET CMAKE_OSX_ARCHITECTURES 0 _arch)
-            if (NOT _arch)
-                set(_arch arm64)
-            endif ()
-            set(_debug "${_lib}/ios/Debug-iphonesimulator-${_arch}/libLive2DCubismCore.a")
-            set(_release "${_lib}/ios/Release-iphonesimulator-${_arch}/libLive2DCubismCore.a")
-        else ()
-            set(_debug "${_lib}/ios/Debug-iphoneos/libLive2DCubismCore.a")
-            set(_release "${_lib}/ios/Release-iphoneos/libLive2DCubismCore.a")
-        endif ()
-
-    elseif (APPLE)
-        set(_arch "${CMAKE_OSX_ARCHITECTURES}")
-        if (NOT _arch)
-            set(_arch "${CMAKE_SYSTEM_PROCESSOR}")
-        endif ()
-        list(LENGTH _arch _arch_count)
-        if (_arch_count GREATER 1)
-            message(FATAL_ERROR
-                    "nx2d: Cubism Core ships one slice per architecture and this is "
-                    "a universal build (${_arch}). Build each arch separately, or "
-                    "lipo the two libLive2DCubismCore.a together first.")
-        endif ()
-        if (_arch STREQUAL "aarch64")
-            set(_arch arm64)
-        endif ()
-        set(_both "${_lib}/macos/${_arch}/libLive2DCubismCore.a")
-
-    elseif (MSVC)
-        # MSVC and clang-cl both link the MSVC-ABI import library, so the
-        # compiler id does not come into it - only the toolset and the CRT.
-        if (CMAKE_SIZEOF_VOID_P EQUAL 8)
-            set(_arch x86_64)
-        else ()
-            set(_arch x86)
-        endif ()
-
-        set(_toolset "${MSVC_TOOLSET_VERSION}")
-        if (NOT _toolset OR NOT EXISTS "${_lib}/windows/${_arch}/${_toolset}")
-            # Newer than anything the SDK shipped for: its ABI has not moved, so
-            # the newest it does ship is the right answer.
-            set(_toolset 143)
-        endif ()
-
-        if (CMAKE_MSVC_RUNTIME_LIBRARY AND
-            NOT CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "DLL")
-            set(_crt MT)
-        else ()
-            set(_crt MD)
-        endif ()
-
-        set(_stem "${_lib}/windows/${_arch}/${_toolset}/Live2DCubismCore_${_crt}")
-        set(_debug "${_stem}d.lib")
-        set(_release "${_stem}.lib")
-
-    else ()
-        if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-            set(_both "${_lib}/experimental/linux/arm64/libLive2DCubismCore.a")
-        else ()
-            set(_both "${_lib}/linux/x86_64/libLive2DCubismCore.a")
-        endif ()
-    endif ()
-
-    if (_both)
-        set(_debug "${_both}")
-        set(_release "${_both}")
-    endif ()
-    set(${out_debug} "${_debug}" PARENT_SCOPE)
-    set(${out_release} "${_release}" PARENT_SCOPE)
-endfunction()
-
 function(nx_add_live2d)
     if (NX_LIVE2D_CORE_DIR)
         _nx_live2d_resolve_core("${NX_LIVE2D_CORE_DIR}" _core)
@@ -137,7 +50,7 @@ function(nx_add_live2d)
         endif ()
     endif ()
 
-    _nx_live2d_core_paths("${_core}" _core_debug _core_release)
+    _nx_prebuilt_paths("${_core}" "Live2DCubismCore" _core_debug _core_release)
     if (NOT EXISTS "${_core_release}")
         message(FATAL_ERROR "nx2d: no Cubism Core binary at ${_core_release}.")
     endif ()
