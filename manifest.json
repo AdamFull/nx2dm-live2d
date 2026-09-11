@@ -6,6 +6,12 @@
   "description": "Owns Cubism runtime state, mask budgets, and lip sync; renders through a custom frame-slot pass.",
   "license": null,
   "created": "2026-08-09",
-  "repository": null,
-  "revision": null
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AdamFull/nx2dm-live2d.git"
+  },
+  "revision": {
+    "branch": "main",
+    "commit": "54ac8e2560a8d46835c149d0a9f877d1a73809cc"
+  }
 }
