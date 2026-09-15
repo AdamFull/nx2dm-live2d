@@ -5,8 +5,8 @@
 
 #include "core/foundation/vfs/vfs.h"
 #include "core/rendering/render2d/render_interop.h"
-#include "core/scene/animation_graph.h"
-#include "core/scene/assets.h"
+#include "core/scene/animation/animation_graph.h"
+#include "core/scene/asset/assets.h"
 #include "live2d/live2d_system.h"
 
 namespace {
