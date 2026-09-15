@@ -1,6 +1,6 @@
 
 #include "core/app/engine.h"
-#include "core/app/script_runtime.h"
+#include "core/app/module_system/script_runtime.h"
 #include "core/script/luau/luau_backend.h"
 #include "core/script/luau/luau_runtime.h"
 
