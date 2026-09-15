@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/rendering/render2d/mesh_channel.h"
+#include "rendering/render2d/mesh_channel.h"
 #include "live2d/live2d_assets.h"
 #include "live2d/live2d_mask.h"
 

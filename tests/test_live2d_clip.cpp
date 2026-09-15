@@ -7,7 +7,7 @@
 #include "core/foundation/platform/filesystem.h"
 #include "core/foundation/strings/format.h"
 #include "core/foundation/vfs/vfs.h"
-#include "core/rendering/rhi/rhi.h"
+#include "rendering/rhi/rhi.h"
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_draw.h"
 #include "live2d/live2d_mask.h"

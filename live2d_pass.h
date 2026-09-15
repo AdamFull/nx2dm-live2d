@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core/rendering/graph/render_graph.h"
-#include "core/rendering/rhi/upload_ring.h"
+#include "rendering/graph/render_graph.h"
+#include "rendering/rhi/upload_ring.h"
 #include "live2d/live2d_draw.h"
 
 namespace nxm::live2d {

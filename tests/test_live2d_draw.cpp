@@ -5,7 +5,7 @@
 
 #include "core/foundation/diagnostics/log.h"
 #include "core/foundation/vfs/vfs.h"
-#include "core/rendering/render2d/render_interop.h"
+#include "rendering/render2d/render_interop.h"
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_draw.h"
 

@@ -2,8 +2,8 @@
 
 #include "live2d/live2d_component.h"
 
-#include "core/app/engine.h"
-#include "core/script/script_host.h"
+#include "app/engine.h"
+#include "script/script_host.h"
 
 namespace nxm::live2d {
 namespace {

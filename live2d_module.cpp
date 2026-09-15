@@ -3,10 +3,10 @@
 #include "live2d/live2d_scripting.h"
 #include "live2d/live2d_system.h"
 
-#include "core/app/assets/async_texture_set.h"
-#include "core/app/engine.h"
-#include "core/app/module_system/module.h"
-#include "core/scene/scene_json.h"
+#include "app/assets/async_texture_set.h"
+#include "app/engine.h"
+#include "app/module_system/module.h"
+#include "scene/scene_json.h"
 
 #include "core/foundation/diagnostics/log.h"
 

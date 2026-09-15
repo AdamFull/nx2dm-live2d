@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/scene/components.h"
+#include "scene/components.h"
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_mask.h"
 

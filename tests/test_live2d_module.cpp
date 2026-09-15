@@ -3,8 +3,8 @@
 
 #include "engine/stub_platform.h"
 
-#include "core/app/engine.h"
-#include "core/app/module_system/module.h"
+#include "app/engine.h"
+#include "app/module_system/module.h"
 #include "live2d/live2d_component.h"
 
 namespace {

@@ -1,8 +1,8 @@
 
-#include "core/app/engine.h"
-#include "core/app/module_system/script_runtime.h"
-#include "core/script/luau/luau_backend.h"
-#include "core/script/luau/luau_runtime.h"
+#include "app/engine.h"
+#include "app/module_system/script_runtime.h"
+#include "script/luau/luau_backend.h"
+#include "script/luau/luau_runtime.h"
 
 #include "live2d/live2d_component.h"
 

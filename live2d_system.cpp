@@ -2,9 +2,9 @@
 
 #include "core/foundation/diagnostics/log.h"
 #include "core/foundation/vfs/vfs.h"
-#include "core/rendering/render2d/material_system.h"
-#include "core/scene/animation/animation_graph.h"
-#include "core/scene/asset/assets.h"
+#include "rendering/render2d/material_system.h"
+#include "scene/animation/animation_graph.h"
+#include "scene/asset/assets.h"
 
 #include <cmath>
 #include <limits>

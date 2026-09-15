@@ -8,7 +8,7 @@
 #include "core/foundation/serialization/asset_policy.h"
 #include "core/foundation/strings/format.h"
 #include "core/foundation/vfs/vfs.h"
-#include "core/rendering/render2d/render_interop.h"
+#include "rendering/render2d/render_interop.h"
 
 #include <CubismDefaultParameterId.hpp>
 #include <CubismModelSettingJson.hpp>

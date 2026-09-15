@@ -1,8 +1,8 @@
 #include "live2d/live2d_draw.h"
 
 #include "core/foundation/diagnostics/log.h"
-#include "core/rendering/render2d/render_interop.h"
-#include "core/rendering/render2d/scene_renderer.h"
+#include "rendering/render2d/render_interop.h"
+#include "rendering/render2d/scene_renderer.h"
 
 #include <Model/CubismModel.hpp>
 #include <Rendering/csmBlendMode.hpp>
