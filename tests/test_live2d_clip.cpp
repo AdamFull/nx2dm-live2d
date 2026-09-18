@@ -7,6 +7,7 @@
 #include "core/foundation/platform/filesystem.h"
 #include "core/foundation/strings/format.h"
 #include "core/foundation/vfs/vfs.h"
+#include "rendering/pipeline_test_utils.h"
 #include "rendering/rhi/rhi.h"
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_draw.h"
@@ -182,7 +183,7 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   });
   REQUIRE(target.valid());
 
-  const rhi::PipelineHandle mask_pipeline = device.create_graphics_pipeline({
+  const rhi::PipelineHandle mask_pipeline = nxe::test::compile_pipeline(device, {
       .name = "live2d mask",
       .vertex = {.shader = shader, .entry_point = "mask_vs"},
       .fragment = {.shader = shader, .entry_point = "mask_fs"},
@@ -193,7 +194,7 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   });
   REQUIRE(mask_pipeline.valid());
 
-  const rhi::PipelineHandle model_pipeline = device.create_graphics_pipeline({
+  const rhi::PipelineHandle model_pipeline = nxe::test::compile_pipeline(device, {
       .name = "live2d model",
       .vertex = {.shader = shader, .entry_point = "model_vs"},
       .fragment = {.shader = shader, .entry_point = "model_fs"},

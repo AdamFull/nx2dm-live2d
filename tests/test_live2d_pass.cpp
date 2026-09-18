@@ -7,6 +7,7 @@
 #include "core/foundation/vfs/vfs.h"
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_pass.h"
+#include "rendering/pipeline_test_utils.h"
 
 #include <cstring>
 
@@ -59,7 +60,7 @@ struct TestPipelines {
 
   [[nodiscard]] bool init(rhi::Device &device, const rhi::ShaderHandle shader,
                           const rhi::Format format) {
-    mask = device.create_graphics_pipeline({
+    mask = nxe::test::compile_pipeline(device, {
         .name = "live2d mask test",
         .vertex = {.shader = shader, .entry_point = "mask_vs"},
         .fragment = {.shader = shader, .entry_point = "mask_fs"},
@@ -71,7 +72,7 @@ struct TestPipelines {
     if (!mask.valid())
       return false;
     for (usize i = 0; i < nx::array_size(models); ++i) {
-      models[i] = device.create_graphics_pipeline({
+      models[i] = nxe::test::compile_pipeline(device, {
           .name = "live2d model test",
           .vertex = {.shader = shader, .entry_point = "model_vs"},
           .fragment = {.shader = shader, .entry_point = "model_fs"},

@@ -6,6 +6,7 @@
 #include "core/foundation/platform/filesystem.h"
 #include "core/foundation/strings/format.h"
 #include "core/foundation/vfs/vfs.h"
+#include "rendering/pipeline_test_utils.h"
 #include "rendering/rhi/image/image.h"
 #include "rendering/rhi/rhi.h"
 #include "live2d/live2d_animator.h"
@@ -166,7 +167,7 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
   });
   REQUIRE(target.valid());
 
-  const rhi::PipelineHandle pipeline = device.create_graphics_pipeline({
+  const rhi::PipelineHandle pipeline = nxe::test::compile_pipeline(device, {
       .name = "mesh",
       .vertex = {.shader = shader, .entry_point = "vs_main"},
       .fragment = {.shader = shader, .entry_point = "fs_main"},
@@ -353,7 +354,7 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
   });
   REQUIRE(target.valid());
 
-  const rhi::PipelineHandle pipeline = device.create_graphics_pipeline({
+  const rhi::PipelineHandle pipeline = nxe::test::compile_pipeline(device, {
       .name = "mesh",
       .vertex = {.shader = shader, .entry_point = "vs_main"},
       .fragment = {.shader = shader, .entry_point = "fs_main"},
