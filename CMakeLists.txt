@@ -29,6 +29,13 @@ target_link_libraries(nx_live2d
         PUBLIC nx::foundation nx::render2d nx::live2d_framework
         PRIVATE nx::compile_options)
 
+# live2d_renderer.cpp defines the CubismRenderer statics the framework calls,
+# and nothing else in nx_live2d references that object. GNU ld scans archives
+# once, left to right, so unless nx_live2d follows the framework on the link
+# line too, the object is never pulled in and the link fails. CMake repeats the
+# pair when two static libraries depend on each other.
+target_link_libraries(nx_live2d_framework PUBLIC nx_live2d)
+
 set_target_properties(nx_live2d PROPERTIES FOLDER "modules")
 
 add_library(nx_live2d_render STATIC live2d_pass.cpp live2d_pass.h
