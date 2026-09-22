@@ -81,3 +81,7 @@ if (TARGET assetc AND NOT ANDROID AND NOT IOS)
     nxtest_discover_tests(nx_live2d_shipping_asset_tests
             PREFIX "shipping: " LABELS live2d)
 endif ()
+
+target_compile_definitions(nx_live2d_tests PRIVATE
+        NX_MODULE_SERVICES_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/../script-services.json")
+target_link_libraries(nx_live2d_tests PRIVATE nx::script_luau)
