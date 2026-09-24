@@ -3,11 +3,12 @@
 
 #include "fixture.h"
 
+#include "core/foundation/threading/thread_pool.h"
 #include "core/foundation/vfs/vfs.h"
+#include "live2d/live2d_system.h"
 #include "rendering/render2d/render_interop.h"
 #include "scene/animation/animation_graph.h"
 #include "scene/asset/assets.h"
-#include "live2d/live2d_system.h"
 
 namespace {
 
@@ -372,6 +373,73 @@ TEST_CASE("live2d: the mask budget degrades excess models without collisions") {
   CHECK(clipped == expected);
   for (const MaskDraw &draw : frame.masks.draws)
     CHECK(draw.atlas == 0u);
+}
+
+TEST_CASE("live2d: models built on the pool emit what one thread does") {
+  NX_REQUIRE_FIXTURE();
+  World world;
+  REQUIRE(world.ok);
+  // Room for two models' masks: the rest go over budget and draw unclipped.
+  constexpr u64 two_atlases = u64{2} * 512 * 512 * 4;
+  world.system.set_mask_limits(512, two_atlases, 2);
+  for (u32 i = 0; i < 5; ++i) {
+    const scene::Entity e = world.place(MODEL);
+    world.registry.get<scene::WorldTransform2D>(e).world[2][0] =
+        nx::cast<f32>(i) * 0.3f;
+  }
+  REQUIRE(world.system.load_pending(world.registry) == 5u);
+
+  // Pooled first, so its per-model buffers start empty rather than holding
+  // what a serial pass already built.
+  nx::thread_pool pool;
+  world.system.set_threads(&pool);
+  Frame pooled;
+  REQUIRE(world.system.emit(world.registry, pooled, {}) == 5u);
+  world.system.set_threads(nullptr);
+  Frame serial;
+  REQUIRE(world.system.emit(world.registry, serial, {}) == 5u);
+
+  REQUIRE(serial.atlas_sizes.size() == 2u);
+  CHECK(pooled.atlas_sizes.size() == serial.atlas_sizes.size());
+  REQUIRE(pooled.geometry.vertices.size() == serial.geometry.vertices.size());
+  REQUIRE(pooled.geometry.indices.size() == serial.geometry.indices.size());
+  REQUIRE(pooled.geometry.draws.size() == serial.geometry.draws.size());
+  REQUIRE(pooled.clips.size() == serial.clips.size());
+  REQUIRE(pooled.masks.vertices.size() == serial.masks.vertices.size());
+  REQUIRE(pooled.masks.draws.size() == serial.masks.draws.size());
+
+  usize mismatched = 0;
+  for (usize i = 0; i < serial.geometry.vertices.size(); ++i)
+    if (pooled.geometry.vertices[i].position !=
+            serial.geometry.vertices[i].position ||
+        pooled.geometry.vertices[i].uv != serial.geometry.vertices[i].uv)
+      ++mismatched;
+  for (usize i = 0; i < serial.geometry.indices.size(); ++i)
+    if (pooled.geometry.indices[i] != serial.geometry.indices[i])
+      ++mismatched;
+  for (usize i = 0; i < serial.geometry.draws.size(); ++i) {
+    const auto &a = serial.geometry.draws[i];
+    const auto &b = pooled.geometry.draws[i];
+    if (a.first_index != b.first_index || a.index_count != b.index_count ||
+        a.vertex_offset != b.vertex_offset || a.texture != b.texture ||
+        a.sort_key != b.sort_key)
+      ++mismatched;
+  }
+  for (usize i = 0; i < serial.clips.size(); ++i) {
+    const DrawMask &a = serial.clips[i];
+    const DrawMask &b = pooled.clips[i];
+    if (a.group != b.group || a.atlas != b.atlas || a.channel != b.channel ||
+        a.inverted != b.inverted || a.from_world != b.from_world)
+      ++mismatched;
+  }
+  for (usize i = 0; i < serial.masks.draws.size(); ++i) {
+    const MaskDraw &a = serial.masks.draws[i];
+    const MaskDraw &b = pooled.masks.draws[i];
+    if (a.first_index != b.first_index || a.vertex_offset != b.vertex_offset ||
+        a.atlas != b.atlas || a.channel != b.channel)
+      ++mismatched;
+  }
+  CHECK(mismatched == 0u);
 }
 
 TEST_CASE("live2d: low memory shrinks live masks and future budget") {

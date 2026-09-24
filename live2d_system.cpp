@@ -275,84 +275,124 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
     mask_bytes += nx::cast<u64>(size) * size * MASK_TEXEL_BYTES;
   usize over_budget = 0;
 
-  usize drawn = 0;
+  m_emit_count = 0;
   registry.view<Live2DModel, Live2DRuntime, scene::WorldTransform2D>().each(
       [&](const scene::Entity, const Live2DModel &model, Live2DRuntime &runtime,
           const scene::WorldTransform2D &node) {
         if (!model.visible || !runtime.ready() || runtime.loaded != model.model)
           return;
-
-        ModelView emit_view;
-        emit_view.world = node.world;
-        emit_view.world[0] *= model.scale;
-        emit_view.world[1] *= model.scale;
-        emit_view.color = model.color;
-        emit_view.layer = model.layer;
-        emit_view.camera = view.camera;
-        emit_view.depth_min = view.depth_min;
-        emit_view.depth_max = view.depth_max;
+        if (m_emit_count == m_emit.size())
+          m_emit.emplace_back();
+        EmitWork &work = m_emit[m_emit_count++];
+        work.runtime = &runtime;
+        work.wants_masks = runtime.masks.active();
+        work.view = ModelView{};
+        work.view.world = node.world;
+        work.view.world[0] *= model.scale;
+        work.view.world[1] *= model.scale;
+        work.view.color = model.color;
+        work.view.layer = model.layer;
+        work.view.camera = view.camera;
+        work.view.depth_min = view.depth_min;
+        work.view.depth_max = view.depth_max;
         if (view.materials != nullptr && model.material != 0u) {
-          emit_view.batch = view.materials->batch_of(model.material);
-          emit_view.material = view.materials->offset_of(model.material);
+          work.view.batch = view.materials->batch_of(model.material);
+          work.view.material = view.materials->offset_of(model.material);
         }
-
-        const u32 size = runtime.masks.atlas_size();
-        const u32 count = runtime.masks.atlas_count();
-        const u64 per_atlas = nx::cast<u64>(size) * size * MASK_TEXEL_BYTES;
-        const u64 required = per_atlas * count;
-        const bool wants_masks = runtime.masks.active();
-        const usize held_atlases = out.atlas_sizes.size();
-        const bool has_atlas_room =
-            held_atlases <= m_mask_atlas_limit &&
-            count <= m_mask_atlas_limit - nx::cast<u32>(held_atlases);
-        const bool has_byte_room = mask_bytes <= m_mask_budget &&
-                                   required <= m_mask_budget - mask_bytes;
-        const bool can_mask = wants_masks && has_atlas_room && has_byte_room;
-        if (wants_masks && !can_mask)
-          ++over_budget;
-
-        const usize model_vertices = out.geometry.vertices.size();
-        const usize model_indices = out.geometry.indices.size();
-        const usize model_draws = out.geometry.draws.size();
-        const usize model_clips = out.clips.size();
-        const usize mask_vertices = out.masks.vertices.size();
-        const usize mask_indices = out.masks.indices.size();
-        const usize mask_draws = out.masks.draws.size();
-        const usize atlas_count = out.atlas_sizes.size();
-
-        u32 atlas_base = 0;
-        if (can_mask) {
-          atlas_base = nx::cast<u32>(out.atlas_sizes.size());
-          out.atlas_sizes.insert(out.atlas_sizes.end(), count, size);
-          if (emit_masks(runtime.asset, runtime.masks, out.masks, atlas_base) ==
-              0u) {
-            out.atlas_sizes.resize(atlas_count);
-            out.masks.vertices.resize(mask_vertices);
-            out.masks.indices.resize(mask_indices);
-            out.masks.draws.resize(mask_draws);
-            atlas_base = 0;
-          }
-        }
-
-        const bool mask_emitted = out.atlas_sizes.size() > atlas_count;
-        const usize appended = emit_model(runtime.asset, emit_view,
-                                          mask_emitted ? runtime.masks : NONE,
-                                          out.geometry, out.clips, atlas_base);
-        if (appended == 0) {
-          out.geometry.vertices.resize(model_vertices);
-          out.geometry.indices.resize(model_indices);
-          out.geometry.draws.resize(model_draws);
-          out.clips.resize(model_clips);
-          out.masks.vertices.resize(mask_vertices);
-          out.masks.indices.resize(mask_indices);
-          out.masks.draws.resize(mask_draws);
-          out.atlas_sizes.resize(atlas_count);
-          return;
-        }
-        if (mask_emitted)
-          mask_bytes += required;
-        ++drawn;
       });
+
+  // Each model builds its draws alone, masks included, as if its masks were
+  // first in the frame's atlases. Which of them keep their masks is decided
+  // below, in order, against the frame's budget.
+  const auto build = [&](const usize i) {
+    EmitWork &work = m_emit[i];
+    work.local.clear();
+    const Live2DRuntime &runtime = *work.runtime;
+    work.masks = work.wants_masks ? emit_masks(runtime.asset, runtime.masks,
+                                               work.local.masks)
+                                  : 0u;
+    work.geometry = emit_model(runtime.asset, work.view,
+                               work.wants_masks ? runtime.masks : NONE,
+                               work.local.geometry, work.local.clips);
+  };
+  if (m_threads != nullptr && m_threads->worker_count() > 0 && m_emit_count > 1)
+    m_threads->parallel_for(0, m_emit_count, 1, build);
+  else
+    for (usize i = 0; i < m_emit_count; ++i)
+      build(i);
+
+  usize drawn = 0;
+  for (usize i = 0; i < m_emit_count; ++i) {
+    EmitWork &work = m_emit[i];
+    const Live2DRuntime &runtime = *work.runtime;
+    const u32 size = runtime.masks.atlas_size();
+    const u32 count = runtime.masks.atlas_count();
+    const u64 per_atlas = nx::cast<u64>(size) * size * MASK_TEXEL_BYTES;
+    const u64 required = per_atlas * count;
+    const usize held_atlases = out.atlas_sizes.size();
+    const bool has_atlas_room =
+        held_atlases <= m_mask_atlas_limit &&
+        count <= m_mask_atlas_limit - nx::cast<u32>(held_atlases);
+    const bool has_byte_room =
+        mask_bytes <= m_mask_budget && required <= m_mask_budget - mask_bytes;
+    const bool can_mask = work.wants_masks && has_atlas_room && has_byte_room;
+    if (work.wants_masks && !can_mask)
+      ++over_budget;
+
+    const bool masked = can_mask && work.masks > 0u;
+    if (work.wants_masks && !masked) {
+      // Built with masks it will not get: draw it again without.
+      work.local.geometry.clear();
+      work.local.clips.clear();
+      work.geometry = emit_model(runtime.asset, work.view, NONE,
+                                 work.local.geometry, work.local.clips);
+    }
+    if (work.geometry == 0u)
+      continue;
+
+    const u32 atlas_base = masked ? nx::cast<u32>(held_atlases) : 0u;
+    if (masked) {
+      out.atlas_sizes.insert(out.atlas_sizes.end(), count, size);
+      MaskChannel &masks = out.masks;
+      const u32 vertex_base = nx::cast<u32>(masks.vertices.size());
+      const u32 index_base = nx::cast<u32>(masks.indices.size());
+      masks.vertices.insert(masks.vertices.end(),
+                            work.local.masks.vertices.begin(),
+                            work.local.masks.vertices.end());
+      masks.indices.insert(masks.indices.end(),
+                           work.local.masks.indices.begin(),
+                           work.local.masks.indices.end());
+      for (MaskDraw draw : work.local.masks.draws) {
+        draw.first_index += index_base;
+        draw.vertex_offset += vertex_base;
+        draw.atlas += atlas_base;
+        masks.draws.push_back(draw);
+      }
+      mask_bytes += required;
+    }
+
+    nxe::r2d::MeshChannel &geometry = out.geometry;
+    const u32 vertex_base = nx::cast<u32>(geometry.vertices.size());
+    const u32 index_base = nx::cast<u32>(geometry.indices.size());
+    geometry.vertices.insert(geometry.vertices.end(),
+                             work.local.geometry.vertices.begin(),
+                             work.local.geometry.vertices.end());
+    geometry.indices.insert(geometry.indices.end(),
+                            work.local.geometry.indices.begin(),
+                            work.local.geometry.indices.end());
+    for (nxe::r2d::MeshDraw draw : work.local.geometry.draws) {
+      draw.first_index += index_base;
+      draw.vertex_offset += vertex_base;
+      geometry.draws.push_back(draw);
+    }
+    for (DrawMask clip : work.local.clips) {
+      if (clip.clipped())
+        clip.atlas += atlas_base;
+      out.clips.push_back(clip);
+    }
+    ++drawn;
+  }
+
   if (over_budget > 0 && !m_budget_warned) {
     nx::logw("live2d: {} masked model(s) exceeded the frame's {} atlas / {} "
              "KiB mask budget and draw unclipped",

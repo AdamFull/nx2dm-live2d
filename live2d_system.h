@@ -1,7 +1,10 @@
 #pragma once
 
 #include "live2d/live2d_component.h"
+#include "live2d/live2d_draw.h"
 #include "live2d/live2d_pass.h"
+
+#include "core/foundation/threading/thread_pool.h"
 
 namespace nxe::r2d {
 class MaterialSystem;
@@ -55,15 +58,33 @@ public:
 
   void set_resolver(TextureResolver resolve) { m_resolve = std::move(resolve); }
 
+  void set_threads(nx::thread_pool *const threads) noexcept {
+    m_threads = threads;
+  }
+
   using VoiceLevel = nx::function<f32(u32 voice)>;
 
   usize drive_lip_sync(nxe::scene::registry_t &registry,
                        const VoiceLevel &level);
 
 private:
+  /// One visible model's draws, built on its own before the frame takes them.
+  struct EmitWork {
+    Live2DRuntime *runtime = nullptr;
+    ModelView view;
+    bool wants_masks = false;
+    Frame local;
+    usize geometry = 0;
+    usize masks = 0;
+  };
+
   [[nodiscard]] u32 mask_resolution(u32 requested) const noexcept;
 
   TextureResolver m_resolve;
+  nx::thread_pool *m_threads = nullptr;
+  /// Reused between frames; only the first m_emit_count are this frame's.
+  nx::vector<EmitWork> m_emit;
+  usize m_emit_count = 0;
   u32 m_mask_resolution_limit = 2048;
   u32 m_mask_atlas_limit = 16;
   u64 m_mask_budget = u64{16} << 20;

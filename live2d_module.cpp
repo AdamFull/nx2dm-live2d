@@ -46,6 +46,7 @@ public:
                                               u64{4} << 20, u64{32} << 20)
                                   : u64{16} << 20;
     m_system.set_mask_limits(max_mask_resolution, memory_budget);
+    m_system.set_threads(&ctx.threads());
     m_system.set_resolver(TextureResolver([this,
                                            &ctx](const nx::string_view path) {
       const nxe::rhi::TextureHandle texture = m_textures.resolve(ctx, path);
