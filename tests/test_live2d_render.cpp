@@ -32,6 +32,7 @@ struct MeshPush {
   u64 vertices = 0;
   u64 indices = 0;
   u64 materials = 0;
+  u64 draws = 0;
   ::MeshPushFields fields = {};
 };
 
@@ -196,7 +197,8 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
     const rhi::BufferHandle b = device.create_buffer({
         .name = name,
         .size = bytes,
-        .usage = rhi::BufferUsage::Storage | rhi::BufferUsage::DeviceAddress,
+        .usage = rhi::BufferUsage::Storage | rhi::BufferUsage::DeviceAddress |
+                 rhi::BufferUsage::Indirect,
         .memory = rhi::MemoryUsage::Upload,
         .persistently_mapped = true,
     });
@@ -223,10 +225,21 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
         upload("live2d indices", channel.indices.data(),
                nx::cast<u64>(channel.indices.size()) * sizeof(u32));
 
+    r2d::MeshStream stream;
+    stream.build({channel.draws.data(), channel.draws.size()});
+    const rhi::BufferHandle records =
+        upload("live2d draws", stream.records.data(),
+               nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw));
+    const rhi::BufferHandle commands =
+        upload("live2d draw commands", stream.commands.data(),
+               nx::cast<u64>(stream.commands.size()) *
+                   sizeof(rhi::DrawIndirectCommand));
+
     MeshPush push;
     push.cameras = device.buffer_address(cameras);
     push.vertices = device.buffer_address(vertices);
     push.indices = device.buffer_address(indices);
+    push.draws = device.buffer_address(records);
 
     rhi::CommandContext cmd;
     REQUIRE(device.begin_headless_frame(cmd));
@@ -245,14 +258,9 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
         {.width = nx::cast<f32>(TARGET), .height = nx::cast<f32>(TARGET)});
     cmd.set_scissor({{0, 0}, {TARGET, TARGET}});
     cmd.bind_pipeline(pipeline);
-    for (const r2d::MeshDraw &draw : channel.draws) {
-      push.fields.index_offset = draw.first_index;
-      push.fields.vertex_offset = draw.vertex_offset;
-      push.fields.texture = nx_texture_2d<float4>(draw.texture);
-      push.fields.camera = draw.camera;
-      cmd.push_constants(&push, sizeof(push));
-      cmd.draw(draw.index_count);
-    }
+    cmd.push_constants(&push, sizeof(push));
+    cmd.draw_indirect(commands, 0, nx::cast<u32>(stream.commands.size()),
+                      sizeof(rhi::DrawIndirectCommand));
     cmd.end_render_pass();
     cmd.barrier(rhi::TextureBarrier{.texture = target,
                                     .from = rhi::ResourceState::ColorAttachment,
@@ -267,6 +275,8 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
                         pixels.data + nx::cast<usize>(TARGET) * TARGET * 4);
     dump(frames[pass].data(), pass);
 
+    device.destroy_buffer(commands);
+    device.destroy_buffer(records);
     device.destroy_buffer(indices);
     device.destroy_buffer(vertices);
   }
@@ -383,7 +393,8 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
     const rhi::BufferHandle b = device.create_buffer({
         .name = name,
         .size = bytes,
-        .usage = rhi::BufferUsage::Storage | rhi::BufferUsage::DeviceAddress,
+        .usage = rhi::BufferUsage::Storage | rhi::BufferUsage::DeviceAddress |
+                 rhi::BufferUsage::Indirect,
         .memory = rhi::MemoryUsage::Upload,
         .persistently_mapped = true,
     });
@@ -402,6 +413,20 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
   const rhi::BufferHandle indices =
       upload("live2d indices", channel.indices.data(),
              nx::cast<u64>(channel.indices.size()) * sizeof(u32));
+
+  r2d::MeshStream stream;
+  stream.build({channel.draws.data(), channel.draws.size()});
+  const rhi::BufferHandle textured =
+      upload("live2d draws", stream.records.data(),
+             nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw));
+  for (GpuMeshDraw &record : stream.records)
+    record.texture = nx_texture_2d<float4>(pack_texture(NX_TEXTURE_NONE, 0));
+  const rhi::BufferHandle untextured =
+      upload("live2d silhouette draws", stream.records.data(),
+             nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw));
+  const rhi::BufferHandle commands = upload(
+      "live2d draw commands", stream.commands.data(),
+      nx::cast<u64>(stream.commands.size()) * sizeof(rhi::DrawIndirectCommand));
 
   MeshPush push;
   push.cameras = device.buffer_address(cameras);
@@ -429,15 +454,10 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
         {.width = nx::cast<f32>(TARGET), .height = nx::cast<f32>(TARGET)});
     cmd.set_scissor({{0, 0}, {TARGET, TARGET}});
     cmd.bind_pipeline(pipeline);
-    for (const r2d::MeshDraw &draw : channel.draws) {
-      push.fields.index_offset = draw.first_index;
-      push.fields.vertex_offset = draw.vertex_offset;
-      push.fields.texture = nx_texture_2d<float4>(
-          pass == Pages ? draw.texture : pack_texture(NX_TEXTURE_NONE, 0));
-      push.fields.camera = draw.camera;
-      cmd.push_constants(&push, sizeof(push));
-      cmd.draw(draw.index_count);
-    }
+    push.draws = device.buffer_address(pass == Pages ? textured : untextured);
+    cmd.push_constants(&push, sizeof(push));
+    cmd.draw_indirect(commands, 0, nx::cast<u32>(stream.commands.size()),
+                      sizeof(rhi::DrawIndirectCommand));
     cmd.end_render_pass();
     cmd.barrier(rhi::TextureBarrier{.texture = target,
                                     .from = rhi::ResourceState::ColorAttachment,
@@ -461,6 +481,9 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
 
   for (const rhi::TextureHandle page : pages)
     device.destroy_texture(page);
+  device.destroy_buffer(commands);
+  device.destroy_buffer(untextured);
+  device.destroy_buffer(textured);
   device.destroy_buffer(indices);
   device.destroy_buffer(vertices);
   device.destroy_buffer(cameras);
