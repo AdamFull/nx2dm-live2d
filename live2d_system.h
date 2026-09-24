@@ -5,6 +5,7 @@
 #include "live2d/live2d_pass.h"
 
 #include "core/foundation/threading/thread_pool.h"
+#include "scene/animation/animation_graph.h"
 
 namespace nxe::r2d {
 class MaterialSystem;
@@ -68,6 +69,17 @@ public:
                        const VoiceLevel &level);
 
 private:
+  /// One ready model to advance. Each owns its Cubism model, so models step in
+  /// parallel.
+  struct UpdateWork {
+    const Live2DModel *model = nullptr;
+    Live2DRuntime *runtime = nullptr;
+    nxe::scene::AnimationGraphComponent *controller = nullptr;
+  };
+
+  void step(const UpdateWork &work, const nxe::scene::AssetRegistry &assets,
+            f32 dt) const;
+
   /// One visible model's draws, built on its own before the frame takes them.
   struct EmitWork {
     Live2DRuntime *runtime = nullptr;
@@ -82,6 +94,7 @@ private:
 
   TextureResolver m_resolve;
   nx::thread_pool *m_threads = nullptr;
+  nx::vector<UpdateWork> m_updates;
   /// Reused between frames; only the first m_emit_count are this frame's.
   nx::vector<EmitWork> m_emit;
   usize m_emit_count = 0;

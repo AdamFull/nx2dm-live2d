@@ -442,6 +442,68 @@ TEST_CASE("live2d: models built on the pool emit what one thread does") {
   CHECK(mismatched == 0u);
 }
 
+TEST_CASE("live2d: models advanced on the pool match one thread") {
+  NX_REQUIRE_FIXTURE();
+  World serial;
+  REQUIRE(serial.ok);
+  scene::registry_t registry;
+  registry.register_component<scene::WorldTransform2D>(
+      {.name = "WorldTransform2D"});
+  Live2DSystem::register_components(registry);
+  Live2DSystem pooled;
+  pooled.set_resolver(
+      TextureResolver([](nx::string_view) { return pack_texture(PAGE, 0); }));
+  nx::thread_pool pool;
+  pooled.set_threads(&pool);
+
+  constexpr u32 COUNT = 6;
+  const auto configure = [](Live2DModel &model, const u32 i) {
+    // Blinking draws from rand(), whose state is per thread; leave it out.
+    model.blink = false;
+    model.breathe = i % 2 == 0;
+    model.mouth = 0.15f * nx::cast<f32>(i);
+    model.time_scale = 0.5f + 0.25f * nx::cast<f32>(i);
+  };
+  nx::vector<scene::Entity> a;
+  nx::vector<scene::Entity> b;
+  for (u32 i = 0; i < COUNT; ++i) {
+    a.push_back(serial.place(MODEL));
+    configure(serial.registry.get<Live2DModel>(a.back()), i);
+    const scene::Entity e = registry.create();
+    (void)registry.emplace<scene::WorldTransform2D>(e);
+    Live2DModel &model = registry.emplace<Live2DModel>(e);
+    model.model = nx::string(MODEL);
+    configure(model, i);
+    b.push_back(e);
+  }
+  REQUIRE(serial.system.load_pending(serial.registry) == COUNT);
+  REQUIRE(pooled.load_pending(registry) == COUNT);
+
+  nx::vector<f32> before;
+  read_parameters(serial.registry.get<Live2DRuntime>(a[0]).asset, before);
+  for (u32 frame = 0; frame < 30; ++frame) {
+    REQUIRE(serial.system.update(serial.registry, 1.f / 60.f) == COUNT);
+    REQUIRE(pooled.update(registry, 1.f / 60.f) == COUNT);
+  }
+
+  nx::vector<f32> moved;
+  read_parameters(serial.registry.get<Live2DRuntime>(a[0]).asset, moved);
+  CHECK(moved != before);
+  usize mismatched = 0;
+  for (u32 i = 0; i < COUNT; ++i) {
+    nx::vector<f32> one;
+    nx::vector<f32> other;
+    read_parameters(serial.registry.get<Live2DRuntime>(a[i]).asset, one);
+    read_parameters(registry.get<Live2DRuntime>(b[i]).asset, other);
+    REQUIRE(one.size() == other.size());
+    for (usize p = 0; p < one.size(); ++p)
+      if (one[p] != other[p])
+        ++mismatched;
+  }
+  CHECK(mismatched == 0u);
+  registry.clear();
+}
+
 TEST_CASE("live2d: low memory shrinks live masks and future budget") {
   NX_REQUIRE_FIXTURE();
   World world;

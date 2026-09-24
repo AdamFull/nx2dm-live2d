@@ -211,55 +211,72 @@ usize Live2DSystem::drive_lip_sync(scene::registry_t &registry,
   return speaking;
 }
 
+void Live2DSystem::step(const UpdateWork &work,
+                        const scene::AssetRegistry &assets,
+                        const f32 dt) const {
+  const Live2DModel &model = *work.model;
+  Live2DRuntime &runtime = *work.runtime;
+  f32 animation_speed = 1.f;
+  if (scene::AnimationGraphComponent *const controller = work.controller;
+      controller != nullptr && !controller->clip_set.valid()) {
+    const scene::AnimationGraph *const graph = assets.graph(controller->graph);
+    if (graph != nullptr) {
+      const auto duration = [&](const u32 slot, const u16, f32 &seconds) {
+        const MotionRef motion =
+            motion_ref(graph->clip_slot_name(slot), model.motion_index);
+        return runtime.animator.motion_duration(motion.group, motion.index,
+                                                seconds);
+      };
+      scene::GraphTick tick;
+      if (scene::update_animation_state_machine(*controller, *graph, duration,
+                                                dt * model.time_scale, tick)) {
+        const scene::AnimationState *const state =
+            graph->state(controller->state);
+        if (state != nullptr) {
+          animation_speed = state->speed * controller->speed;
+          if (tick.entered != scene::INVALID_STATE) {
+            const MotionRef motion = motion_ref(
+                graph->clip_slot_name(state->clip_slot), model.motion_index);
+            (void)runtime.animator.play(
+                motion.group, motion.index,
+                state->mode == scene::PlayMode::Loop,
+                controller->blending() ? controller->blend_duration : 0.f);
+          }
+        }
+        if (!controller->playing)
+          animation_speed = 0.f;
+      }
+    }
+  }
+  runtime.animator.set_blinking(model.blink);
+  runtime.animator.set_breathing(model.breathe);
+  runtime.animator.set_mouth(model.mouth);
+  runtime.animator.update(dt * model.time_scale * animation_speed);
+  runtime.masks.update(runtime.asset);
+}
+
 usize Live2DSystem::update(scene::registry_t &registry,
                            const scene::AssetRegistry &assets, const f32 dt) {
-  usize stepped = 0;
+  m_updates.clear();
   registry.view<Live2DModel, Live2DRuntime>().each([&](const scene::Entity e,
                                                        const Live2DModel &model,
                                                        Live2DRuntime &runtime) {
     if (!runtime.ready() || runtime.loaded != model.model)
       return;
-    f32 animation_speed = 1.f;
-    if (auto *controller = registry.try_get<scene::AnimationGraphComponent>(e);
-        controller != nullptr && !controller->clip_set.valid()) {
-      const scene::AnimationGraph *const graph =
-          assets.graph(controller->graph);
-      if (graph != nullptr) {
-        const auto duration = [&](const u32 slot, const u16, f32 &seconds) {
-          const MotionRef motion =
-              motion_ref(graph->clip_slot_name(slot), model.motion_index);
-          return runtime.animator.motion_duration(motion.group, motion.index,
-                                                  seconds);
-        };
-        scene::GraphTick tick;
-        if (scene::update_animation_state_machine(
-                *controller, *graph, duration, dt * model.time_scale, tick)) {
-          const scene::AnimationState *const state =
-              graph->state(controller->state);
-          if (state != nullptr) {
-            animation_speed = state->speed * controller->speed;
-            if (tick.entered != scene::INVALID_STATE) {
-              const MotionRef motion = motion_ref(
-                  graph->clip_slot_name(state->clip_slot), model.motion_index);
-              (void)runtime.animator.play(
-                  motion.group, motion.index,
-                  state->mode == scene::PlayMode::Loop,
-                  controller->blending() ? controller->blend_duration : 0.f);
-            }
-          }
-          if (!controller->playing)
-            animation_speed = 0.f;
-        }
-      }
-    }
-    runtime.animator.set_blinking(model.blink);
-    runtime.animator.set_breathing(model.breathe);
-    runtime.animator.set_mouth(model.mouth);
-    runtime.animator.update(dt * model.time_scale * animation_speed);
-    runtime.masks.update(runtime.asset);
-    ++stepped;
+    m_updates.push_back({&model, &runtime,
+                         registry.try_get<scene::AnimationGraphComponent>(e)});
   });
-  return stepped;
+
+  // Cubism ids are registered when a model loads, so the lookups a step makes
+  // only read the shared id table.
+  const auto one = [&](const usize i) { step(m_updates[i], assets, dt); };
+  if (m_threads != nullptr && m_threads->worker_count() > 0 &&
+      m_updates.size() > 1)
+    m_threads->parallel_for(0, m_updates.size(), 1, one);
+  else
+    for (usize i = 0; i < m_updates.size(); ++i)
+      one(i);
+  return m_updates.size();
 }
 
 usize Live2DSystem::update(scene::registry_t &registry, const f32 dt) {
