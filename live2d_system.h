@@ -58,6 +58,12 @@ public:
 
   usize on_low_memory(nxe::scene::registry_t &registry);
 
+  /// Mocs revived for models now loaded, one per file however many models
+  /// share it.
+  [[nodiscard]] usize shared_mocs() const noexcept { return m_mocs.size(); }
+  /// Lets go of the mocs, before the Cubism framework shuts down.
+  void release_mocs() noexcept { m_mocs.clear(); }
+
   [[nodiscard]] u32 mask_resolution_limit() const noexcept {
     return m_mask_resolution_limit;
   }
@@ -103,6 +109,7 @@ private:
   [[nodiscard]] u32 mask_resolution(u32 requested) const noexcept;
 
   TextureResolver m_resolve;
+  MocCache m_mocs;
   nx::thread_pool *m_threads = nullptr;
   nx::vector<UpdateWork> m_updates;
   /// Reused between frames; only the first m_emit_count are this frame's.

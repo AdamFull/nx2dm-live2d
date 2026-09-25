@@ -2,12 +2,14 @@
 
 #include "core/foundation/core/callable.h"
 #include "core/foundation/strings/utf8_string.h"
+#include "core/foundation/threading/sync.h"
 
 #include <glm/vec2.hpp>
 
 #include <span>
 
 namespace Live2D::Cubism::Framework {
+class CubismMoc;
 class CubismModel;
 class CubismUserModel;
 class ACubismMotion;
@@ -66,6 +68,61 @@ struct ModelMesh {
   }
 };
 
+/// A moc revived once and shared by every model made from it, with the mesh
+/// its drawables never change.
+class SharedMoc {
+public:
+  explicit SharedMoc(Live2D::Cubism::Framework::CubismMoc *moc) noexcept
+      : m_moc(moc) {}
+  ~SharedMoc();
+
+  SharedMoc(const SharedMoc &) = delete;
+  SharedMoc &operator=(const SharedMoc &) = delete;
+
+  /// Null when Core refuses the bytes, or they fail its consistency check.
+  [[nodiscard]] static nx::shared_ptr<SharedMoc>
+  revive(std::span<const u8> bytes);
+
+  [[nodiscard]] Live2D::Cubism::Framework::CubismMoc *moc() const noexcept {
+    return m_moc;
+  }
+  [[nodiscard]] const nx::shared_ptr<const ModelMesh> &mesh() const noexcept {
+    return m_mesh;
+  }
+
+  // The moc counts its models in a plain integer.
+  [[nodiscard]] Live2D::Cubism::Framework::CubismModel *create_model();
+  void delete_model(Live2D::Cubism::Framework::CubismModel *model) noexcept;
+
+private:
+  Live2D::Cubism::Framework::CubismMoc *m_moc = nullptr;
+  nx::shared_ptr<const ModelMesh> m_mesh;
+  nx::mutex m_models;
+};
+
+/// Mocs by file and generation, so models made from one file share it. Only
+/// the thread that loads models uses it.
+class MocCache {
+public:
+  [[nodiscard]] nx::shared_ptr<SharedMoc> find(nx::string_view key,
+                                               u64 generation) const;
+  void add(nx::string_view key, u64 generation, nx::shared_ptr<SharedMoc> moc);
+
+  /// Drops the mocs no model holds any longer. Returns how many.
+  usize prune();
+  void clear() noexcept { m_entries.clear(); }
+
+  [[nodiscard]] usize size() const noexcept { return m_entries.size(); }
+
+private:
+  struct Entry {
+    nx::string key;
+    u64 generation = 0;
+    nx::shared_ptr<SharedMoc> moc;
+  };
+  nx::vector<Entry> m_entries;
+};
+
 class ModelAsset {
 public:
   ModelAsset() = default;
@@ -91,7 +148,11 @@ public:
   [[nodiscard]] CanvasInfo canvas() const noexcept { return m_canvas; }
 
   [[nodiscard]] const nx::shared_ptr<const ModelMesh> &mesh() const noexcept {
-    return m_mesh;
+    static const nx::shared_ptr<const ModelMesh> none;
+    return m_moc ? m_moc->mesh() : none;
+  }
+  [[nodiscard]] const nx::shared_ptr<SharedMoc> &moc() const noexcept {
+    return m_moc;
   }
 
   [[nodiscard]] std::span<const u32> textures() const noexcept {
@@ -127,7 +188,7 @@ public:
 
 private:
   friend bool load_model(nx::string_view, TextureResolver, ModelAsset &,
-                         nx::string &);
+                         nx::string &, MocCache *);
 
   void reset() noexcept;
 
@@ -139,7 +200,7 @@ private:
   nx::vector<nx::string> m_lip_sync;
   nx::vector<nx::string> m_dependencies;
   CanvasInfo m_canvas;
-  nx::shared_ptr<const ModelMesh> m_mesh;
+  nx::shared_ptr<SharedMoc> m_moc;
   bool m_physics = false;
   bool m_pose = false;
   bool m_eye_blink = false;
@@ -148,8 +209,10 @@ private:
 /// Loads an authored .model3.json tree in development and its atomic
 /// .model3.json.nxb bundle in Shipping. Textures remain independently cooked
 /// texture assets; every other runtime subresource is embedded in the model.
+/// With @p mocs, a model whose moc file another model already revived shares
+/// that moc and its mesh rather than reading and reviving its own.
 [[nodiscard]] bool load_model(nx::string_view model3_path,
                               TextureResolver resolve, ModelAsset &out,
-                              nx::string &error);
+                              nx::string &error, MocCache *mocs = nullptr);
 
 } // namespace nxm::live2d

@@ -2,6 +2,7 @@
 #include "framework/nxtest.h"
 
 #include "core/foundation/vfs/vfs.h"
+#include "live2d/live2d_animator.h"
 #include "live2d/live2d_assets.h"
 
 namespace {
@@ -81,4 +82,92 @@ TEST_CASE("live2d: the bundled model loads with a moc, canvas and motions") {
 
   CHECK(asset.has_physics());
   CHECK(!asset.motions().empty());
+}
+
+TEST_CASE("live2d: models of one file share its moc and mesh, not their pose") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  MocCache mocs;
+  nx::string error;
+  ModelAsset first;
+  ModelAsset second;
+  REQUIRE(load_model(MODEL, {}, first, error, &mocs));
+  REQUIRE(load_model(MODEL, {}, second, error, &mocs));
+  CHECK(mocs.size() == 1u);
+  REQUIRE(first.moc());
+  CHECK(first.moc().get() == second.moc().get());
+  CHECK(first.mesh().get() == second.mesh().get());
+  CHECK(first.model() != second.model());
+
+  ModelAsset alone;
+  REQUIRE(load_model(MODEL, {}, alone, error));
+  CHECK(alone.moc().get() != first.moc().get());
+  CHECK(alone.mesh()->vertex_count() == first.mesh()->vertex_count());
+
+  // Each is still its own instance: turning one leaves the other.
+  Animator turned(first);
+  Animator still(second);
+  REQUIRE(turned.set_parameter("ParamAngleX", 30.f));
+  turned.refresh();
+  still.refresh();
+  CHECK(turned.parameter("ParamAngleX") == 30.f);
+  CHECK(still.parameter("ParamAngleX") == 0.f);
+  nx::vector<f32> a, b;
+  read_vertices(first, a);
+  read_vertices(second, b);
+  CHECK(a != b);
+}
+
+TEST_CASE("live2d: a shared moc outlives each model and goes with the last") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  MocCache mocs;
+  nx::string error;
+  ModelAsset first;
+  ModelAsset second;
+  REQUIRE(load_model(MODEL, {}, first, error, &mocs));
+  REQUIRE(load_model(MODEL, {}, second, error, &mocs));
+
+  first = ModelAsset();
+  CHECK(mocs.prune() == 0u);
+  CHECK(mocs.size() == 1u);
+  // The survivor still poses from the moc the first one let go of.
+  Animator animator(second);
+  animator.update(1.f / 60.f);
+  nx::vector<f32> vertices;
+  read_vertices(second, vertices);
+  CHECK(!vertices.empty());
+
+  second = ModelAsset();
+  CHECK(mocs.prune() == 1u);
+  CHECK(mocs.size() == 0u);
+
+  // Loading again revives it afresh.
+  REQUIRE(load_model(MODEL, {}, first, error, &mocs));
+  CHECK(mocs.size() == 1u);
+}
+
+TEST_CASE("live2d: a moc of another generation is never reused") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  MocCache mocs;
+  nx::string error;
+  ModelAsset asset;
+  REQUIRE(load_model(MODEL, {}, asset, error));
+  const nx::shared_ptr<SharedMoc> moc = asset.moc();
+
+  mocs.add("/m.moc3", 1u, moc);
+  CHECK(mocs.find("/m.moc3", 1u).get() == moc.get());
+  CHECK_FALSE(mocs.find("/m.moc3", 2u));
+  CHECK_FALSE(mocs.find("/other.moc3", 1u));
+  // A new generation of the same file takes its place.
+  mocs.add("/m.moc3", 2u, moc);
+  CHECK(mocs.size() == 1u);
+  CHECK_FALSE(mocs.find("/m.moc3", 1u));
 }

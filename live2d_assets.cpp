@@ -34,6 +34,25 @@ public:
   using csm::CubismUserModel::_model;
   using csm::CubismUserModel::_physics;
   using csm::CubismUserModel::_pose;
+
+  // LoadModel with a moc it does not own, which it leaves to release() rather
+  // than the base destructor.
+  [[nodiscard]] bool adopt(SharedMoc &shared) {
+    _moc = shared.moc();
+    _model = shared.create_model();
+    if (_model == nullptr)
+      return false;
+    _model->SaveParameters();
+    _modelMatrix = CSM_NEW csm::CubismModelMatrix(_model->GetCanvasWidth(),
+                                                  _model->GetCanvasHeight());
+    return true;
+  }
+
+  void release(SharedMoc &shared) noexcept {
+    shared.delete_model(_model);
+    _model = nullptr;
+    _moc = nullptr;
+  }
 };
 
 [[nodiscard]] nx::string beside(const nx::string_view manifest,
@@ -119,6 +138,71 @@ build_mesh(csm::CubismModel &model) {
 
 } // namespace
 
+SharedMoc::~SharedMoc() { csm::CubismMoc::Delete(m_moc); }
+
+nx::shared_ptr<SharedMoc> SharedMoc::revive(const std::span<const u8> bytes) {
+  if (bytes.empty() ||
+      bytes.size() >
+          nx::cast<usize>(std::numeric_limits<csm::csmSizeInt>::max()))
+    return {};
+  csm::CubismMoc *const moc = csm::CubismMoc::Create(
+      bytes.data(), nx::cast<csm::csmSizeInt>(bytes.size()), true);
+  if (moc == nullptr)
+    return {};
+  nx::shared_ptr<SharedMoc> shared = nx::make_shared<SharedMoc>(moc);
+  csm::CubismModel *const probe = shared->create_model();
+  if (probe == nullptr)
+    return {};
+  shared->m_mesh = build_mesh(*probe);
+  shared->delete_model(probe);
+  return shared;
+}
+
+csm::CubismModel *SharedMoc::create_model() {
+  const nx::scoped_lock<nx::mutex> held(m_models);
+  return m_moc->CreateModel();
+}
+
+void SharedMoc::delete_model(csm::CubismModel *const model) noexcept {
+  if (model == nullptr)
+    return;
+  const nx::scoped_lock<nx::mutex> held(m_models);
+  m_moc->DeleteModel(model);
+}
+
+nx::shared_ptr<SharedMoc> MocCache::find(const nx::string_view key,
+                                         const u64 generation) const {
+  for (const Entry &entry : m_entries)
+    if (entry.generation == generation && entry.key == key)
+      return entry.moc;
+  return {};
+}
+
+void MocCache::add(const nx::string_view key, const u64 generation,
+                   nx::shared_ptr<SharedMoc> moc) {
+  for (Entry &entry : m_entries)
+    if (entry.key == key) {
+      entry.generation = generation;
+      entry.moc = std::move(moc);
+      return;
+    }
+  m_entries.push_back({nx::string(key), generation, std::move(moc)});
+}
+
+usize MocCache::prune() {
+  usize dropped = 0;
+  for (usize i = 0; i < m_entries.size();) {
+    if (m_entries[i].moc.use_count() > 1u) {
+      ++i;
+      continue;
+    }
+    m_entries[i] = std::move(m_entries.back());
+    m_entries.pop_back();
+    ++dropped;
+  }
+  return dropped;
+}
+
 ModelAsset::~ModelAsset() { reset(); }
 
 ModelAsset::ModelAsset(ModelAsset &&other) noexcept
@@ -128,7 +212,7 @@ ModelAsset::ModelAsset(ModelAsset &&other) noexcept
       m_missing(std::move(other.m_missing)),
       m_lip_sync(std::move(other.m_lip_sync)),
       m_dependencies(std::move(other.m_dependencies)), m_canvas(other.m_canvas),
-      m_mesh(std::move(other.m_mesh)), m_physics(other.m_physics),
+      m_moc(std::move(other.m_moc)), m_physics(other.m_physics),
       m_pose(other.m_pose), m_eye_blink(other.m_eye_blink) {
   other.m_owner = nullptr;
 }
@@ -144,7 +228,7 @@ ModelAsset &ModelAsset::operator=(ModelAsset &&other) noexcept {
     m_lip_sync = std::move(other.m_lip_sync);
     m_dependencies = std::move(other.m_dependencies);
     m_canvas = other.m_canvas;
-    m_mesh = std::move(other.m_mesh);
+    m_moc = std::move(other.m_moc);
     m_physics = other.m_physics;
     m_pose = other.m_pose;
     m_eye_blink = other.m_eye_blink;
@@ -162,7 +246,10 @@ void ModelAsset::reset() noexcept {
   m_expressions.clear();
 
   if (m_owner != nullptr) {
-    CSM_DELETE(static_cast<HostedModel *>(m_owner));
+    auto *const hosted = static_cast<HostedModel *>(m_owner);
+    if (m_moc)
+      hosted->release(*m_moc);
+    CSM_DELETE(hosted);
     m_owner = nullptr;
   }
   m_textures.clear();
@@ -170,7 +257,7 @@ void ModelAsset::reset() noexcept {
   m_lip_sync.clear();
   m_dependencies.clear();
   m_canvas = {};
-  m_mesh = {};
+  m_moc = {};
   m_physics = false;
   m_pose = false;
   m_eye_blink = false;
@@ -220,7 +307,7 @@ ModelAsset::find_expression(const nx::string_view name) const noexcept {
 }
 
 bool load_model(const nx::string_view model3_path, TextureResolver resolve,
-                ModelAsset &out, nx::string &error) {
+                ModelAsset &out, nx::string &error, MocCache *const mocs) {
   if (!install_platform()) {
     error = "the Cubism framework would not start";
     return false;
@@ -316,30 +403,48 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   const nx::string moc_path = beside(authored_path.view(), moc_name);
   if (!bundle)
     out.m_dependencies.push_back(moc_path);
-  const LoadedResource moc = read_resource(bundle ? &bundle.value() : nullptr,
-                                           authored_path.view(), moc_name);
-  if (!moc) {
-    error = nx::format("no moc at '{}'", moc_path);
-    return false;
-  }
+  // A bundle's moc changes with the bundle; an authored one with its file.
+  const nx::string moc_key =
+      bundle ? nx::format("{}#{}", cooked_path, moc_name) : moc_path;
+  const u64 moc_generation =
+      nx::vfs::file_generation(bundle ? cooked_path.view() : moc_path.view());
+  nx::shared_ptr<SharedMoc> shared =
+      mocs != nullptr ? mocs->find(moc_key.view(), moc_generation)
+                      : nx::shared_ptr<SharedMoc>{};
+  if (!shared) {
+    const LoadedResource moc = read_resource(bundle ? &bundle.value() : nullptr,
+                                             authored_path.view(), moc_name);
+    if (!moc) {
+      error = nx::format("no moc at '{}'", moc_path);
+      return false;
+    }
 
-  const u32 version = nx::cast<u32>(core::csmGetMocVersion(
-      moc.bytes.data(), nx::cast<unsigned int>(moc.bytes.size())));
-  if (version == 0 || version > latest_moc_version()) {
-    error = nx::format("{}: moc3 format {} and this Core reads up to {}",
-                       moc_path, version, latest_moc_version());
-    return false;
+    const u32 version = nx::cast<u32>(core::csmGetMocVersion(
+        moc.bytes.data(), nx::cast<unsigned int>(moc.bytes.size())));
+    if (version == 0 || version > latest_moc_version()) {
+      error = nx::format("{}: moc3 format {} and this Core reads up to {}",
+                         moc_path, version, latest_moc_version());
+      return false;
+    }
+
+    shared = SharedMoc::revive(moc.bytes);
+    if (!shared) {
+      error = nx::format("{}: Core refused the moc", moc_path);
+      return false;
+    }
+    if (mocs != nullptr)
+      mocs->add(moc_key.view(), moc_generation, shared);
   }
 
   auto *const owner = CSM_NEW HostedModel();
-  owner->LoadModel(moc.bytes.data(),
-                   nx::cast<csm::csmSizeInt>(moc.bytes.size()), true);
-  if (owner->GetModel() == nullptr) {
+  if (!owner->adopt(*shared)) {
+    owner->release(*shared);
     CSM_DELETE(owner);
     error = nx::format("{}: Core refused the moc", moc_path);
     return false;
   }
   out.m_owner = owner;
+  out.m_moc = std::move(shared);
 
   {
     core::csmVector2 size{};
@@ -350,7 +455,6 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
         &size, &origin, &units);
     out.m_canvas = {size.X, size.Y, origin.X, origin.Y, units};
   }
-  out.m_mesh = build_mesh(*owner->GetModel());
 
   const auto read_optional = [&](const nx::string_view name,
                                  nx::string &path_out) {

@@ -170,6 +170,7 @@ public:
   void on_unregister(nxe::ModuleContext &ctx) override {
     m_system.set_resolver({});
     m_textures.release_all(ctx);
+    m_system.release_mocs();
     uninstall_platform();
   }
 

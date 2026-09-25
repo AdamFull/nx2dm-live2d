@@ -108,7 +108,8 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
     runtime->asset = ModelAsset{};
 
     nx::string error;
-    if (!load_model(model.model.view(), m_resolve, runtime->asset, error)) {
+    if (!load_model(model.model.view(), m_resolve, runtime->asset, error,
+                    &m_mocs)) {
       nx::loge("live2d: {}", error);
       runtime->loaded.clear();
       const u32 exponent = nx::min(runtime->load_failures, 5u);
@@ -132,6 +133,9 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
     runtime->source_stamp = source_stamp(runtime->asset.dependencies());
     ++loaded;
   }
+  // After the loads, so a model replacing one of the same file this frame
+  // takes its moc rather than reviving it again.
+  (void)m_mocs.prune();
   return loaded;
 }
 
@@ -152,7 +156,8 @@ usize Live2DSystem::reload_changed(scene::registry_t &registry,
 
         ModelAsset fresh_asset;
         nx::string error;
-        if (!load_model(model.model.view(), m_resolve, fresh_asset, error)) {
+        if (!load_model(model.model.view(), m_resolve, fresh_asset, error,
+                        &m_mocs)) {
           nx::logw(
               "live2d: '{}' changed but its last valid generation remains: "
               "{}",

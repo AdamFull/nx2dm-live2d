@@ -357,6 +357,11 @@ TEST_CASE("live2d: every masked model in a frame gets its own atlas") {
   const scene::Entity second = world.place(MODEL);
   REQUIRE(world.system.load_pending(world.registry) == 2u);
 
+  // One moc for the file, and so one mesh for the renderer to upload.
+  CHECK(world.system.shared_mocs() == 1u);
+  CHECK(world.registry.get<Live2DRuntime>(first).asset.mesh().get() ==
+        world.registry.get<Live2DRuntime>(second).asset.mesh().get());
+
   Frame frame;
   CHECK(world.system.emit(world.registry, frame, {}) == 2u);
 
