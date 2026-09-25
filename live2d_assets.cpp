@@ -133,6 +133,14 @@ build_mesh(csm::CubismModel &model) {
   return mesh;
 }
 
+// Models load on several workers at once. Core is not safe to revive mocs or
+// create models concurrently: on arm64 it called a null pointer inside
+// csmInitializeModelInPlace. The moc also counts its models in a plain integer.
+nx::mutex &core_lock() noexcept {
+  static nx::mutex lock;
+  return lock;
+}
+
 } // namespace
 
 SharedMoc::~SharedMoc() { csm::CubismMoc::Delete(m_moc); }
@@ -142,8 +150,12 @@ nx::shared_ptr<SharedMoc> SharedMoc::revive(const std::span<const u8> bytes) {
       bytes.size() >
           nx::cast<usize>(std::numeric_limits<csm::csmSizeInt>::max()))
     return {};
-  csm::CubismMoc *const moc = csm::CubismMoc::Create(
-      bytes.data(), nx::cast<csm::csmSizeInt>(bytes.size()), true);
+  csm::CubismMoc *moc = nullptr;
+  {
+    const nx::scoped_lock<nx::mutex> held(core_lock());
+    moc = csm::CubismMoc::Create(bytes.data(),
+                                 nx::cast<csm::csmSizeInt>(bytes.size()), true);
+  }
   if (moc == nullptr)
     return {};
   nx::shared_ptr<SharedMoc> shared = nx::make_shared<SharedMoc>(moc);
@@ -156,14 +168,14 @@ nx::shared_ptr<SharedMoc> SharedMoc::revive(const std::span<const u8> bytes) {
 }
 
 csm::CubismModel *SharedMoc::create_model() {
-  const nx::scoped_lock<nx::mutex> held(m_models);
+  const nx::scoped_lock<nx::mutex> held(core_lock());
   return m_moc->CreateModel();
 }
 
 void SharedMoc::delete_model(csm::CubismModel *const model) noexcept {
   if (model == nullptr)
     return;
-  const nx::scoped_lock<nx::mutex> held(m_models);
+  const nx::scoped_lock<nx::mutex> held(core_lock());
   m_moc->DeleteModel(model);
 }
 

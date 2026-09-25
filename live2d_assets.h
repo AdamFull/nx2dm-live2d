@@ -92,14 +92,12 @@ public:
     return m_mesh;
   }
 
-  // The moc counts its models in a plain integer.
   [[nodiscard]] Live2D::Cubism::Framework::CubismModel *create_model();
   void delete_model(Live2D::Cubism::Framework::CubismModel *model) noexcept;
 
 private:
   Live2D::Cubism::Framework::CubismMoc *m_moc = nullptr;
   nx::shared_ptr<const ModelMesh> m_mesh;
-  nx::mutex m_models;
 };
 
 /// Mocs by file and generation, so models made from one file share it. Models
