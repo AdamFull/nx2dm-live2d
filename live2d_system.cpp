@@ -2,6 +2,7 @@
 
 #include "core/foundation/diagnostics/log.h"
 #include "core/foundation/diagnostics/profiler.h"
+#include "core/foundation/strings/format.h"
 #include "core/foundation/vfs/vfs.h"
 #include "rendering/render2d/material_system.h"
 #include "scene/animation/animation_graph.h"
@@ -11,6 +12,7 @@
 
 #include <cmath>
 #include <limits>
+#include <optional>
 
 namespace nxm::live2d {
 namespace {
@@ -73,8 +75,164 @@ void Live2DSystem::set_mask_limits(const u32 max_resolution, const u64 bytes,
   m_budget_warned = false;
 }
 
+namespace {
+
+class ContextReader final : public ModelReader {
+public:
+  explicit ContextReader(nx::vfs::AsyncIoContext &context) noexcept
+      : m_context(context) {}
+
+  [[nodiscard]] nx::vfs::FileInfo stat(const nx::string_view path) override {
+    return m_context.stat(path);
+  }
+  [[nodiscard]] std::optional<nx::blob<u8>> read(const nx::string_view path,
+                                                 const u64 max_bytes) override {
+    auto bytes = m_context.read(path, max_bytes);
+    if (!bytes)
+      return std::nullopt;
+    return std::move(bytes.value());
+  }
+
+private:
+  nx::vfs::AsyncIoContext &m_context;
+};
+
+[[nodiscard]] bool in_flight(const nx::vfs::AssetPipelineStage stage) noexcept {
+  using Stage = nx::vfs::AssetPipelineStage;
+  return stage == Stage::Queued || stage == Stage::Acquiring ||
+         stage == Stage::WaitingToPrepare || stage == Stage::Preparing;
+}
+
+} // namespace
+
+void Live2DSystem::bind_loads(nx::vfs::AsyncIoService &io,
+                              nx::thread_pool &workers) {
+  m_loads.bind(io, workers);
+  m_async = true;
+}
+
+void Live2DSystem::shutdown_loads() noexcept {
+  for (const PendingLoad &pending : m_pending)
+    (void)m_loads.release(pending.handle);
+  m_pending.clear();
+  m_loads.shutdown();
+  m_async = false;
+}
+
+void Live2DSystem::start_load(const scene::Entity entity,
+                              const Live2DModel &model) {
+  const nx::string key = nx::format("{}#{}", model.model, entity.raw());
+  const nx::vfs::AssetLoadHandle handle = m_loads.request(
+      {.key = key.view(), .generation = ++m_load_generation},
+      ModelLoadPipeline::AcquireFn(
+          [path = model.model](nx::vfs::AsyncIoContext &context,
+                               const nx::string_view,
+                               const nx::cancellation_token &cancellation) {
+            cancellation.throw_if_requested();
+            GatheredModel gathered;
+            ContextReader reader(context);
+            gathered.ok = gather_model(path.view(), reader, gathered.source,
+                                       gathered.error);
+            return gathered;
+          }),
+      ModelLoadPipeline::PrepareFn(
+          [mocs = &m_mocs](GatheredModel &&gathered, const nx::string_view,
+                           const nx::cancellation_token &cancellation) {
+            cancellation.throw_if_requested();
+            PreparedModel prepared;
+            if (!gathered.ok) {
+              prepared.error = std::move(gathered.error);
+              return prepared;
+            }
+            prepared.ok = build_model(gathered.source, prepared.asset,
+                                      prepared.error, mocs);
+            return prepared;
+          }));
+  if (handle.valid())
+    m_pending.push_back({entity, model.model, handle});
+}
+
+usize Live2DSystem::take_loads(scene::registry_t &registry) {
+  m_loads.pump();
+  usize taken = 0;
+  for (usize i = 0; i < m_pending.size();) {
+    PendingLoad &pending = m_pending[i];
+    const bool alive = registry.alive(pending.entity);
+    const Live2DModel *const model =
+        alive ? registry.try_get<Live2DModel>(pending.entity) : nullptr;
+    Live2DRuntime *const runtime =
+        alive ? registry.try_get<Live2DRuntime>(pending.entity) : nullptr;
+    // A model asked for something else meanwhile, or went away: the result is
+    // dropped and the pipeline cancels what is left of it.
+    const bool wanted = model != nullptr && runtime != nullptr &&
+                        model->model == pending.path &&
+                        runtime->requested == pending.path;
+    const nx::vfs::AssetPipelineStage stage = m_loads.stage(pending.handle);
+    if (wanted && in_flight(stage)) {
+      ++i;
+      continue;
+    }
+
+    if (wanted) {
+      nx::string why;
+      bool published = false;
+      if (stage == nx::vfs::AssetPipelineStage::ReadyToPublish)
+        (void)m_loads.publish(
+            pending.handle,
+            [&](PreparedModel &&prepared, const nx::string_view, const u64) {
+              if (!prepared.ok) {
+                why = std::move(prepared.error);
+                return false;
+              }
+              runtime->asset = std::move(prepared.asset);
+              resolve_textures(runtime->asset, m_resolve);
+              finish_load(*model, *runtime);
+              published = true;
+              return true;
+            });
+      if (published)
+        ++taken;
+      else
+        fail_load(*runtime,
+                  why.empty()
+                      ? nx::format("{}: the load did not finish", pending.path)
+                      : why);
+    }
+    (void)m_loads.release(pending.handle);
+    m_pending[i] = std::move(m_pending.back());
+    m_pending.pop_back();
+  }
+  return taken;
+}
+
+void Live2DSystem::fail_load(Live2DRuntime &runtime, const nx::string &error) {
+  nx::loge("live2d: {}", error);
+  runtime.loaded.clear();
+  const u32 exponent = nx::min(runtime.load_failures, 5u);
+  runtime.retry_in =
+      nx::min(LOAD_RETRY_BASE_SECONDS * nx::cast<f32>(u32{1} << exponent),
+              LOAD_RETRY_MAX_SECONDS);
+  runtime.load_failures = nx::min(runtime.load_failures + 1u, 32u);
+}
+
+void Live2DSystem::finish_load(const Live2DModel &model,
+                               Live2DRuntime &runtime) {
+  runtime.loaded = model.model;
+  runtime.retry_in = 0.f;
+  runtime.load_failures = 0;
+  runtime.animator.bind(&runtime.asset);
+  if (!model.motion.empty() || model.motion_index != 0)
+    (void)runtime.animator.play(model.motion.view(), model.motion_index,
+                                model.motion_loop);
+  runtime.animator.update(0.f);
+  (void)runtime.masks.build(runtime.asset,
+                            mask_resolution(model.mask_resolution), 1);
+  runtime.masks.update(runtime.asset);
+  runtime.source_stamp = source_stamp(runtime.asset.dependencies());
+}
+
 usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
-  usize loaded = 0;
+  usize loaded = m_async ? take_loads(registry) : 0u;
   nx::vector<scene::Entity> wanted;
   const f32 elapsed = std::isfinite(dt) ? nx::max(dt, 0.f) : 0.f;
 
@@ -84,6 +242,9 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
           (void)registry.remove<Live2DRuntime>(e);
           return;
         }
+        for (const PendingLoad &pending : m_pending)
+          if (pending.entity == e)
+            return;
         Live2DRuntime *const runtime = registry.try_get<Live2DRuntime>(e);
         if (runtime == nullptr || runtime->requested != model.model) {
           wanted.push_back(e);
@@ -107,30 +268,17 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
     runtime->masks.clear();
     runtime->asset = ModelAsset{};
 
+    if (m_async) {
+      start_load(e, model);
+      continue;
+    }
     nx::string error;
     if (!load_model(model.model.view(), m_resolve, runtime->asset, error,
                     &m_mocs)) {
-      nx::loge("live2d: {}", error);
-      runtime->loaded.clear();
-      const u32 exponent = nx::min(runtime->load_failures, 5u);
-      runtime->retry_in =
-          nx::min(LOAD_RETRY_BASE_SECONDS * nx::cast<f32>(u32{1} << exponent),
-                  LOAD_RETRY_MAX_SECONDS);
-      runtime->load_failures = nx::min(runtime->load_failures + 1u, 32u);
+      fail_load(*runtime, error);
       continue;
     }
-    runtime->loaded = model.model;
-    runtime->retry_in = 0.f;
-    runtime->load_failures = 0;
-    runtime->animator.bind(&runtime->asset);
-    if (!model.motion.empty() || model.motion_index != 0)
-      (void)runtime->animator.play(model.motion.view(), model.motion_index,
-                                   model.motion_loop);
-    runtime->animator.update(0.f);
-    (void)runtime->masks.build(runtime->asset,
-                               mask_resolution(model.mask_resolution), 1);
-    runtime->masks.update(runtime->asset);
-    runtime->source_stamp = source_stamp(runtime->asset.dependencies());
+    finish_load(model, *runtime);
     ++loaded;
   }
   // After the loads, so a model replacing one of the same file this frame

@@ -3,9 +3,11 @@
 #include "core/foundation/core/callable.h"
 #include "core/foundation/strings/utf8_string.h"
 #include "core/foundation/threading/sync.h"
+#include "core/foundation/vfs/vfs.h"
 
 #include <glm/vec2.hpp>
 
+#include <optional>
 #include <span>
 
 namespace Live2D::Cubism::Framework {
@@ -100,8 +102,8 @@ private:
   nx::mutex m_models;
 };
 
-/// Mocs by file and generation, so models made from one file share it. Only
-/// the thread that loads models uses it.
+/// Mocs by file and generation, so models made from one file share it. Models
+/// may load on several threads at once.
 class MocCache {
 public:
   [[nodiscard]] nx::shared_ptr<SharedMoc> find(nx::string_view key,
@@ -110,9 +112,9 @@ public:
 
   /// Drops the mocs no model holds any longer. Returns how many.
   usize prune();
-  void clear() noexcept { m_entries.clear(); }
+  void clear() noexcept;
 
-  [[nodiscard]] usize size() const noexcept { return m_entries.size(); }
+  [[nodiscard]] usize size() const noexcept;
 
 private:
   struct Entry {
@@ -120,6 +122,7 @@ private:
     u64 generation = 0;
     nx::shared_ptr<SharedMoc> moc;
   };
+  mutable nx::mutex m_lock;
   nx::vector<Entry> m_entries;
 };
 
@@ -187,13 +190,15 @@ public:
   }
 
 private:
-  friend bool load_model(nx::string_view, TextureResolver, ModelAsset &,
-                         nx::string &, MocCache *);
+  friend bool build_model(const struct ModelSource &, ModelAsset &,
+                          nx::string &, MocCache *);
+  friend void resolve_textures(ModelAsset &, const TextureResolver &);
 
   void reset() noexcept;
 
   Live2D::Cubism::Framework::CubismUserModel *m_owner = nullptr;
   nx::vector<u32> m_textures;
+  nx::vector<nx::string> m_texture_paths;
   nx::vector<MotionEntry> m_motions;
   nx::vector<ExpressionEntry> m_expressions;
   nx::vector<nx::string> m_missing;
@@ -206,11 +211,53 @@ private:
   bool m_eye_blink = false;
 };
 
-/// Loads an authored .model3.json tree in development and its atomic
-/// .model3.json.nxb bundle in Shipping. Textures remain independently cooked
-/// texture assets; every other runtime subresource is embedded in the model.
-/// With @p mocs, a model whose moc file another model already revived shares
-/// that moc and its mesh rather than reading and reviving its own.
+/// Where gather_model reads from: the VFS itself, or an async I/O context on
+/// the VFS service.
+class ModelReader {
+public:
+  virtual ~ModelReader() = default;
+  [[nodiscard]] virtual nx::vfs::FileInfo stat(nx::string_view path) = 0;
+  [[nodiscard]] virtual std::optional<nx::blob<u8>> read(nx::string_view path,
+                                                         u64 max_bytes) = 0;
+};
+
+/// Every byte a model is built from, read before any of it is parsed: the
+/// cooked bundle, or the authored manifest and each file it names.
+struct ModelSource {
+  struct File {
+    nx::string name;
+    nx::blob<u8> bytes;
+    u64 generation = 0;
+  };
+
+  nx::string authored_path;
+  nx::string cooked_path;
+  bool bundled = false;
+  nx::blob<u8> cooked;
+  u64 cooked_generation = 0;
+  nx::blob<u8> manifest;
+  /// The authored files the manifest names; one that is not there is absent.
+  nx::vector<File> files;
+};
+
+/// Reads everything the model at @p model3_path is built from. An authored
+/// tree loads in development; Shipping requires the cooked .model3.json.nxb.
+[[nodiscard]] bool gather_model(nx::string_view model3_path,
+                                ModelReader &reader, ModelSource &out,
+                                nx::string &error);
+
+/// Builds the model from what gather_model read. It does no I/O and touches
+/// nothing another thread owns, so it may run on a worker; its textures are
+/// left for resolve_textures. With @p mocs, a model whose moc file another
+/// model already revived shares that moc and its mesh.
+[[nodiscard]] bool build_model(const ModelSource &source, ModelAsset &out,
+                               nx::string &error, MocCache *mocs = nullptr);
+
+/// Resolves the model's texture pages, on the thread that owns textures.
+void resolve_textures(ModelAsset &asset, const TextureResolver &resolve);
+
+/// gather_model, build_model and resolve_textures on the calling thread, for
+/// tools and tests. A running game loads through Live2DSystem instead.
 [[nodiscard]] bool load_model(nx::string_view model3_path,
                               TextureResolver resolve, ModelAsset &out,
                               nx::string &error, MocCache *mocs = nullptr);

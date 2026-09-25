@@ -51,6 +51,8 @@ public:
     m_system.set_mask_limits(max_mask_resolution, memory_budget);
     m_renderer.set_atlas_limit(max_mask_resolution);
     m_system.set_threads(&ctx.threads());
+    if (nx::vfs::AsyncIoService *const io = ctx.async_io())
+      m_system.bind_loads(*io, ctx.threads());
     m_system.set_resolver(TextureResolver([this,
                                            &ctx](const nx::string_view path) {
       const nxe::rhi::TextureHandle texture = m_textures.resolve(ctx, path);
@@ -170,6 +172,7 @@ public:
   void on_unregister(nxe::ModuleContext &ctx) override {
     m_system.set_resolver({});
     m_textures.release_all(ctx);
+    m_system.shutdown_loads();
     m_system.release_mocs();
     uninstall_platform();
   }

@@ -7,6 +7,8 @@
 #include <ICubismAllocator.hpp>
 #include <Live2DCubismCore.hpp>
 
+#include <atomic>
+
 namespace nxm::live2d {
 namespace {
 
@@ -36,8 +38,7 @@ Allocator &allocator() {
   return instance;
 }
 
-bool g_started = false;
-
+std::atomic<bool> g_started{false};
 }
 
 CoreVersion core_version() noexcept {
@@ -51,7 +52,7 @@ u32 latest_moc_version() noexcept {
 }
 
 bool install_platform() {
-  if (g_started)
+  if (g_started.load(std::memory_order_acquire))
     return true;
 
   static csm::CubismFramework::Option option{};
@@ -63,7 +64,7 @@ bool install_platform() {
     return false;
   }
   csm::CubismFramework::Initialize();
-  g_started = true;
+  g_started.store(true, std::memory_order_release);
 
   const CoreVersion version = core_version();
   nx::logd("live2d: Cubism Core {}.{}.{}, moc3 up to format {}", version.major,
@@ -72,11 +73,11 @@ bool install_platform() {
 }
 
 void uninstall_platform() {
-  if (!g_started)
+  if (!g_started.load(std::memory_order_acquire))
     return;
   csm::CubismFramework::Dispose();
   csm::CubismFramework::CleanUp();
-  g_started = false;
+  g_started.store(false, std::memory_order_release);
 }
 
 }

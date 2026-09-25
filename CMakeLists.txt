@@ -16,7 +16,7 @@ nx_add_live2d()
 set(NX_LIVE2D_HEADERS live2d_animator.h live2d_assets.h live2d_component.h
         live2d_draw.h live2d_mask.h live2d_platform.h live2d_asset_bundle.h)
 set(NX_LIVE2D_SOURCES live2d_animator.cpp live2d_assets.cpp live2d_draw.cpp
-        live2d_mask.cpp live2d_platform.cpp live2d_renderer.cpp
+        live2d_ids.cpp live2d_mask.cpp live2d_platform.cpp live2d_renderer.cpp
         live2d_asset_bundle.cpp)
 
 add_library(nx_live2d STATIC ${NX_LIVE2D_SOURCES} ${NX_LIVE2D_HEADERS})

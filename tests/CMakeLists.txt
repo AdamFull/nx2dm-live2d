@@ -38,9 +38,10 @@ file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/../templates/model/assets/live2d"
         DESTINATION "${_live2d_bundled}")
 
 add_executable(nx_live2d_bundled_tests test_live2d_bundled.cpp
-        test_live2d_asset_bundle.cpp)
+        test_live2d_asset_bundle.cpp test_live2d_loading.cpp)
 target_link_libraries(nx_live2d_bundled_tests
-        PRIVATE nx::test nx::foundation nx::live2d nx::compile_options)
+        PRIVATE nx::test nx::foundation nx::live2d nx::live2d_render
+        nx::compile_options)
 target_compile_definitions(nx_live2d_bundled_tests PRIVATE
         NX_LIVE2D_BUNDLED_DIR="${_live2d_bundled}"
         NX_REQUIRE_MODULE_FIXTURES=$<BOOL:${NX_REQUIRE_MODULE_FIXTURES}>)

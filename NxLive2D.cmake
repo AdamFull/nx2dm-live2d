@@ -88,6 +88,9 @@ function(nx_add_live2d)
     if (NOT _framework_sources)
         message(FATAL_ERROR "no Cubism Framework sources under ${_src}")
     endif ()
+    # live2d_ids.cpp builds the id manager in its place, with a lock: models
+    # load on workers while others look ids up.
+    list(FILTER _framework_sources EXCLUDE REGEX "/Id/CubismIdManager\.cpp$")
 
     # Our own target rather than the SDK's CMakeLists, for the reason
     # NxSpine.cmake gives: theirs sets flags of its own choosing, and this way

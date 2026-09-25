@@ -5,6 +5,7 @@
 #include "live2d/live2d_pass.h"
 
 #include "core/foundation/threading/thread_pool.h"
+#include "core/foundation/vfs/asset_pipeline.h"
 #include "scene/animation/animation_graph.h"
 
 namespace nxe::r2d {
@@ -18,6 +19,21 @@ class AssetRegistry;
 namespace nxm::live2d {
 
 inline constexpr nx::string_view SERVICE = "live2d.animation";
+
+struct GatheredModel {
+  ModelSource source;
+  nx::string error;
+  bool ok = false;
+};
+
+struct PreparedModel {
+  ModelAsset asset;
+  nx::string error;
+  bool ok = false;
+};
+
+using ModelLoadPipeline =
+    nx::vfs::StagedAssetPipeline<GatheredModel, PreparedModel>;
 
 struct SceneView {
   u32 camera = 0;
@@ -64,6 +80,17 @@ public:
   /// Lets go of the mocs, before the Cubism framework shuts down.
   void release_mocs() noexcept { m_mocs.clear(); }
 
+  /// Reads models on @p io and builds them on @p workers from now on, to be
+  /// taken up by load_pending once ready; until then load_pending loads on the
+  /// calling thread.
+  void bind_loads(nx::vfs::AsyncIoService &io, nx::thread_pool &workers);
+  /// Drains the loads still in flight, before the Cubism framework shuts
+  /// down.
+  void shutdown_loads() noexcept;
+  [[nodiscard]] usize loads_in_flight() const noexcept {
+    return m_pending.size();
+  }
+
   [[nodiscard]] u32 mask_resolution_limit() const noexcept {
     return m_mask_resolution_limit;
   }
@@ -108,8 +135,24 @@ private:
 
   [[nodiscard]] u32 mask_resolution(u32 requested) const noexcept;
 
+  struct PendingLoad {
+    nxe::scene::Entity entity{};
+    nx::string path;
+    nx::vfs::AssetLoadHandle handle;
+  };
+
+  void start_load(nxe::scene::Entity entity, const Live2DModel &model);
+  usize take_loads(nxe::scene::registry_t &registry);
+  void finish_load(const Live2DModel &model, Live2DRuntime &runtime);
+  void fail_load(Live2DRuntime &runtime, const nx::string &error);
+
   TextureResolver m_resolve;
   MocCache m_mocs;
+  // After the cache it builds into, so it drains first.
+  ModelLoadPipeline m_loads;
+  bool m_async = false;
+  u64 m_load_generation = 0;
+  nx::vector<PendingLoad> m_pending;
   nx::thread_pool *m_threads = nullptr;
   nx::vector<UpdateWork> m_updates;
   /// Reused between frames; only the first m_emit_count are this frame's.

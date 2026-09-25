@@ -95,22 +95,19 @@ struct LoadedResource {
   return true;
 }
 
-[[nodiscard]] LoadedResource read_resource(const ModelBundleView *const bundle,
-                                           const nx::string_view model_path,
-                                           const nx::string_view name) {
-  if (!nx::resource_bundle::valid_name(name))
-    return {};
-  if (bundle != nullptr)
-    return {.storage = {}, .bytes = bundle->resources.find(name)};
-  const nx::string path = beside(model_path, name);
-  auto bytes = nx::vfs::read(path.view());
-  if (!bytes || bytes->empty() || bytes->size() > MAX_LIVE2D_RESOURCE_BYTES)
-    return {};
-  LoadedResource out;
-  out.storage = std::move(bytes.value());
-  out.bytes = {out.storage.data(), out.storage.size()};
-  return out;
-}
+class VfsReader final : public ModelReader {
+public:
+  [[nodiscard]] nx::vfs::FileInfo stat(const nx::string_view path) override {
+    return nx::vfs::stat(path);
+  }
+  [[nodiscard]] std::optional<nx::blob<u8>> read(const nx::string_view path,
+                                                 const u64 max_bytes) override {
+    auto bytes = nx::vfs::read(path);
+    if (!bytes || bytes->size() > max_bytes)
+      return std::nullopt;
+    return std::move(bytes.value());
+  }
+};
 
 [[nodiscard]] nx::shared_ptr<const ModelMesh>
 build_mesh(csm::CubismModel &model) {
@@ -172,6 +169,7 @@ void SharedMoc::delete_model(csm::CubismModel *const model) noexcept {
 
 nx::shared_ptr<SharedMoc> MocCache::find(const nx::string_view key,
                                          const u64 generation) const {
+  const nx::scoped_lock<nx::mutex> held(m_lock);
   for (const Entry &entry : m_entries)
     if (entry.generation == generation && entry.key == key)
       return entry.moc;
@@ -180,6 +178,7 @@ nx::shared_ptr<SharedMoc> MocCache::find(const nx::string_view key,
 
 void MocCache::add(const nx::string_view key, const u64 generation,
                    nx::shared_ptr<SharedMoc> moc) {
+  const nx::scoped_lock<nx::mutex> held(m_lock);
   for (Entry &entry : m_entries)
     if (entry.key == key) {
       entry.generation = generation;
@@ -190,6 +189,7 @@ void MocCache::add(const nx::string_view key, const u64 generation,
 }
 
 usize MocCache::prune() {
+  const nx::scoped_lock<nx::mutex> held(m_lock);
   usize dropped = 0;
   for (usize i = 0; i < m_entries.size();) {
     if (m_entries[i].moc.use_count() > 1u) {
@@ -203,10 +203,21 @@ usize MocCache::prune() {
   return dropped;
 }
 
+void MocCache::clear() noexcept {
+  const nx::scoped_lock<nx::mutex> held(m_lock);
+  m_entries.clear();
+}
+
+usize MocCache::size() const noexcept {
+  const nx::scoped_lock<nx::mutex> held(m_lock);
+  return m_entries.size();
+}
+
 ModelAsset::~ModelAsset() { reset(); }
 
 ModelAsset::ModelAsset(ModelAsset &&other) noexcept
     : m_owner(other.m_owner), m_textures(std::move(other.m_textures)),
+      m_texture_paths(std::move(other.m_texture_paths)),
       m_motions(std::move(other.m_motions)),
       m_expressions(std::move(other.m_expressions)),
       m_missing(std::move(other.m_missing)),
@@ -222,6 +233,7 @@ ModelAsset &ModelAsset::operator=(ModelAsset &&other) noexcept {
     reset();
     m_owner = other.m_owner;
     m_textures = std::move(other.m_textures);
+    m_texture_paths = std::move(other.m_texture_paths);
     m_motions = std::move(other.m_motions);
     m_expressions = std::move(other.m_expressions);
     m_missing = std::move(other.m_missing);
@@ -253,6 +265,7 @@ void ModelAsset::reset() noexcept {
     m_owner = nullptr;
   }
   m_textures.clear();
+  m_texture_paths.clear();
   m_missing.clear();
   m_lip_sync.clear();
   m_dependencies.clear();
@@ -306,8 +319,100 @@ ModelAsset::find_expression(const nx::string_view name) const noexcept {
   return nullptr;
 }
 
+bool gather_model(const nx::string_view model3_path, ModelReader &reader,
+                  ModelSource &out, nx::string &error) {
+  out = {};
+  error.clear();
+  const bool explicit_cooked = ends_with(model3_path, ".nxb");
+  out.authored_path =
+      explicit_cooked
+          ? nx::string(model3_path.substr(0, model3_path.size() - 4))
+          : nx::string(model3_path);
+  out.cooked_path = nx::string(model3_path);
+  if (!explicit_cooked)
+    out.cooked_path += ".nxb";
+
+  const nx::vfs::FileInfo cooked_info = reader.stat(out.cooked_path.view());
+  if (cooked_info.exists) {
+    if (cooked_info.is_directory ||
+        cooked_info.size > MAX_LIVE2D_BUNDLE_BYTES) {
+      error = nx::format("cooked model '{}' exceeds its size limit",
+                         out.cooked_path);
+      return false;
+    }
+    // A read that fails leaves the bundle empty, and build_model reports it
+    // malformed.
+    out.bundled = true;
+    if (auto bytes =
+            reader.read(out.cooked_path.view(), MAX_LIVE2D_BUNDLE_BYTES))
+      out.cooked = std::move(bytes.value());
+    out.cooked_generation = nx::vfs::file_generation(out.cooked_path.view());
+    return true;
+  }
+  if (explicit_cooked ||
+      !nx::asset_policy::can_fallback_to_authored_source(cooked_info.exists)) {
+    error = nx::format("no cooked model at '{}'", out.cooked_path);
+    return false;
+  }
+
+  auto bytes = reader.read(out.authored_path.view(), MAX_LIVE2D_MANIFEST_BYTES);
+  if (!bytes || bytes->empty()) {
+    error = nx::format("no bounded model at '{}'", out.authored_path);
+    return false;
+  }
+  out.manifest = std::move(bytes.value());
+  ModelManifest manifest;
+  if (!parse_model_manifest(
+          nx::string_view(reinterpret_cast<const char *>(out.manifest.data()),
+                          out.manifest.size()),
+          manifest, error)) {
+    error = nx::format("{}: {}", out.authored_path, error);
+    return false;
+  }
+  for (const nx::string &name : manifest.embedded) {
+    if (!nx::resource_bundle::valid_name(name.view()))
+      continue;
+    const nx::string path = beside(out.authored_path.view(), name.view());
+    auto file = reader.read(path.view(), MAX_LIVE2D_RESOURCE_BYTES);
+    if (!file || file->empty())
+      continue;
+    out.files.push_back(
+        {name, std::move(file.value()), nx::vfs::file_generation(path.view())});
+  }
+  return true;
+}
+
+void resolve_textures(ModelAsset &asset, const TextureResolver &resolve) {
+  for (usize i = 0;
+       i < asset.m_texture_paths.size() && i < asset.m_textures.size(); ++i) {
+    const nx::string &path = asset.m_texture_paths[i];
+    if (path.empty())
+      continue;
+    const u32 packed =
+        resolve ? resolve(path.view()) : pack_texture(NX_TEXTURE_NONE, 0);
+    if ((packed >> 16) == NX_TEXTURE_NONE)
+      nx::logw("live2d: no texture for '{}'; its drawables will be untextured",
+               path);
+    asset.m_textures[i] = packed;
+  }
+}
+
 bool load_model(const nx::string_view model3_path, TextureResolver resolve,
                 ModelAsset &out, nx::string &error, MocCache *const mocs) {
+  VfsReader reader;
+  ModelSource source;
+  if (!gather_model(model3_path, reader, source, error)) {
+    out = ModelAsset();
+    return false;
+  }
+  if (!build_model(source, out, error, mocs))
+    return false;
+  resolve_textures(out, resolve);
+  return true;
+}
+
+bool build_model(const ModelSource &source, ModelAsset &out, nx::string &error,
+                 MocCache *const mocs) {
   if (!install_platform()) {
     error = "the Cubism framework would not start";
     return false;
@@ -315,59 +420,41 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   out.reset();
   error.clear();
 
-  nx::blob<u8> cooked_storage;
-  nx::blob<u8> authored_storage;
+  const nx::string &authored_path = source.authored_path;
+  const nx::string &cooked_path = source.cooked_path;
   std::optional<ModelBundleView> bundle;
   std::span<const u8> manifest;
-  const bool explicit_cooked = ends_with(model3_path, ".nxb");
-  const nx::string authored_path =
-      explicit_cooked
-          ? nx::string(model3_path.substr(0, model3_path.size() - 4))
-          : nx::string(model3_path);
-  nx::string cooked_path(model3_path);
-  if (!explicit_cooked)
-    cooked_path += ".nxb";
   out.m_dependencies.push_back(cooked_path);
-  const nx::vfs::FileInfo cooked_info = nx::vfs::stat(cooked_path.view());
-  if (cooked_info.exists) {
-    if (cooked_info.is_directory ||
-        cooked_info.size > MAX_LIVE2D_BUNDLE_BYTES) {
-      error =
-          nx::format("cooked model '{}' exceeds its size limit", cooked_path);
-      return false;
-    }
-    auto bytes = nx::vfs::read(cooked_path.view());
-    if (bytes)
-      cooked_storage = std::move(bytes.value());
-    bundle = open_model_bundle({cooked_storage.data(), cooked_storage.size()});
+  if (source.bundled) {
+    bundle = open_model_bundle({source.cooked.data(), source.cooked.size()});
     if (!bundle) {
       error = nx::format("cooked model '{}' is malformed", cooked_path);
       return false;
     }
     manifest = bundle->model_json();
   } else {
-    if (explicit_cooked || !nx::asset_policy::can_fallback_to_authored_source(
-                               cooked_info.exists)) {
-      error = nx::format("no cooked model at '{}'", cooked_path);
-      return false;
-    }
     out.m_dependencies.push_back(authored_path);
-    auto bytes = nx::vfs::read(authored_path.view());
-    if (!bytes || bytes->empty() || bytes->size() > MAX_LIVE2D_MANIFEST_BYTES) {
-      error = nx::format("no bounded model at '{}'", authored_path);
-      return false;
-    }
-    authored_storage = std::move(bytes.value());
-    manifest = {authored_storage.data(), authored_storage.size()};
-    ModelManifest validated;
-    if (!parse_model_manifest(
-            nx::string_view(reinterpret_cast<const char *>(manifest.data()),
-                            manifest.size()),
-            validated, error)) {
-      error = nx::format("{}: {}", authored_path, error);
-      return false;
-    }
+    manifest = {source.manifest.data(), source.manifest.size()};
   }
+
+  const auto find = [&](const nx::string_view name) -> LoadedResource {
+    if (!nx::resource_bundle::valid_name(name))
+      return {};
+    if (bundle)
+      return {.storage = {}, .bytes = bundle->resources.find(name)};
+    for (const ModelSource::File &file : source.files)
+      if (file.name.view() == name)
+        return {.storage = {}, .bytes = {file.bytes.data(), file.bytes.size()}};
+    return {};
+  };
+  const auto generation_of = [&](const nx::string_view name) -> u64 {
+    if (bundle)
+      return source.cooked_generation;
+    for (const ModelSource::File &file : source.files)
+      if (file.name.view() == name)
+        return file.generation;
+    return 0;
+  };
 
   // Several specialized Cubism JSON constructors do not remain safe after
   // their internal parser rejects a document. Validate the exact byte spans
@@ -406,14 +493,12 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   // A bundle's moc changes with the bundle; an authored one with its file.
   const nx::string moc_key =
       bundle ? nx::format("{}#{}", cooked_path, moc_name) : moc_path;
-  const u64 moc_generation =
-      nx::vfs::file_generation(bundle ? cooked_path.view() : moc_path.view());
+  const u64 moc_generation = generation_of(moc_name);
   nx::shared_ptr<SharedMoc> shared =
       mocs != nullptr ? mocs->find(moc_key.view(), moc_generation)
                       : nx::shared_ptr<SharedMoc>{};
   if (!shared) {
-    const LoadedResource moc = read_resource(bundle ? &bundle.value() : nullptr,
-                                             authored_path.view(), moc_name);
+    const LoadedResource moc = find(moc_name);
     if (!moc) {
       error = nx::format("no moc at '{}'", moc_path);
       return false;
@@ -461,8 +546,7 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
     path_out = beside(authored_path.view(), name);
     if (!bundle)
       out.m_dependencies.push_back(path_out);
-    LoadedResource bytes = read_resource(bundle ? &bundle.value() : nullptr,
-                                         authored_path.view(), name);
+    LoadedResource bytes = find(name);
     if (!bytes) {
       out.m_missing.push_back(path_out);
       nx::logw("live2d: {} names '{}', which is not there", authored_path,
@@ -484,17 +568,14 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   for (i32 i = 0; i < settings.GetTextureCount(); ++i) {
     const char *const name = settings.GetTextureFileName(i);
     if (empty_name(name)) {
+      out.m_texture_paths.emplace_back();
       out.m_textures.push_back(pack_texture(NX_TEXTURE_NONE, 0));
       continue;
     }
     const nx::string path = beside(authored_path.view(), name);
     out.m_dependencies.push_back(path);
-    const u32 packed =
-        resolve ? resolve(path) : pack_texture(NX_TEXTURE_NONE, 0);
-    if ((packed >> 16) == NX_TEXTURE_NONE)
-      nx::logw("live2d: no texture for '{}'; its drawables will be untextured",
-               path);
-    out.m_textures.push_back(packed);
+    out.m_texture_paths.push_back(path);
+    out.m_textures.push_back(pack_texture(NX_TEXTURE_NONE, 0));
   }
 
   nx::string path;
