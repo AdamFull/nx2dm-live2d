@@ -40,6 +40,7 @@ struct ModelView {
   u32 material = 0;
 };
 
+/// Expands a posed model into engine mesh draws, unclipped.
 usize emit_model(const ModelAsset &asset, const ModelView &view,
                  nxe::r2d::MeshChannel &out);
 
@@ -48,41 +49,46 @@ struct DrawMask {
   u32 atlas = 0;
   u32 channel = 0;
   bool inverted = false;
-  glm::mat3 from_world{1.f};
+  /// Model space to the mask atlas's 0..1 texture space.
+  glm::mat3 to_mask{1.f};
 
   [[nodiscard]] bool clipped() const noexcept { return group >= 0; }
 };
 
-usize emit_model(const ModelAsset &asset, const ModelView &view,
-                 const MaskLayout &masks, nxe::r2d::MeshChannel &out,
-                 nx::vector<DrawMask> &out_masks, u32 atlas_base = 0);
+/// One visible drawable, drawn from its model's positions and its mesh.
+struct ModelDraw {
+  u32 model = 0;
+  u32 drawable = 0;
+  u32 texture = 0;
+  u32 color = 0;
+  nxe::r2d::MeshBlend blend = nxe::r2d::MeshBlend::Normal;
+  DrawMask clip;
+};
 
-struct MaskDraw {
-  u32 first_index = 0;
-  u32 index_count = 0;
-  u32 vertex_offset = 0;
+/// Appends the model's visible drawables in render order, naming @p model.
+/// Each is clipped by @p masks when given, as if its atlases came first.
+usize emit_draws(const ModelAsset &asset, const ModelView &view,
+                 const MaskLayout *masks, u32 model,
+                 nx::vector<ModelDraw> &out);
+
+/// Writes every drawable's current positions, in model space, in the mesh's
+/// vertex order. @p out holds the mesh's vertex_count().
+void copy_positions(const ModelAsset &asset, std::span<glm::vec2> out) noexcept;
+
+/// One mask shape: a drawable drawn into its group's tile of a mask atlas.
+struct MaskShape {
+  u32 model = 0;
+  u32 drawable = 0;
   u32 texture = 0;
   u32 atlas = 0;
   u32 channel = 0;
+  /// Model space to the atlas's -1..1 clip space.
   glm::mat3 to_mask{1.f};
   glm::vec4 tile{-1.f, -1.f, 1.f, 1.f};
 };
 
-struct MaskChannel {
-  nx::vector<nxe::r2d::MeshVertex> vertices;
-  nx::vector<u32> indices;
-  nx::vector<MaskDraw> draws;
-
-  [[nodiscard]] bool empty() const noexcept { return draws.empty(); }
-  void clear() {
-    vertices.clear();
-    indices.clear();
-    draws.clear();
-  }
-};
-
-usize emit_masks(const ModelAsset &asset, const MaskLayout &masks,
-                 MaskChannel &out, u32 atlas_base = 0);
+usize emit_mask_shapes(const ModelAsset &asset, const MaskLayout &masks,
+                       u32 model, nx::vector<MaskShape> &out);
 
 [[nodiscard]] usize masked_drawable_count(const ModelAsset &asset) noexcept;
 

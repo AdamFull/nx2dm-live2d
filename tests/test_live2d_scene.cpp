@@ -169,12 +169,14 @@ TEST_CASE("live2d: a model named by a component is loaded, posed and drawn") {
   Frame frame;
   CHECK(world.system.emit(world.registry, frame, {}) == 1u);
   CHECK(!frame.empty());
-  CHECK(frame.clips.size() == frame.geometry.draws.size());
+  REQUIRE(frame.models.size() == 1u);
+  CHECK(frame.models[0].mesh == runtime->asset.mesh());
+  CHECK(frame.positions.size() == runtime->asset.mesh()->vertex_count());
   CHECK(!frame.masks.empty());
   REQUIRE(frame.atlas_sizes.size() == runtime->masks.atlas_count());
   CHECK(frame.atlas_sizes[0] == runtime->masks.atlas_size());
 
-  for (const nxe::r2d::MeshDraw &draw : frame.geometry.draws)
+  for (const ModelDraw &draw : frame.draws)
     CHECK((draw.texture >> 16) == PAGE);
 }
 
@@ -245,10 +247,19 @@ TEST_CASE("live2d: the component's placement and scale reach the vertices") {
   Frame big;
   REQUIRE(scaled.system.emit(scaled.registry, big, {}) == 1u);
 
-  REQUIRE(plain.geometry.vertices.size() == big.geometry.vertices.size());
-  for (usize i = 0; i < plain.geometry.vertices.size(); ++i) {
-    const glm::vec2 a = plain.geometry.vertices[i].position - glm::vec2(0.5f);
-    const glm::vec2 b = big.geometry.vertices[i].position - glm::vec2(0.5f);
+  // Positions stay in model space; the placement rides the model to the GPU.
+  REQUIRE(plain.positions.size() == big.positions.size());
+  REQUIRE(plain.models.size() == 1u);
+  REQUIRE(big.models.size() == 1u);
+  const glm::mat3 &unit = plain.models[0].world;
+  const glm::mat3 &quadruple = big.models[0].world;
+  for (usize i = 0; i < plain.positions.size(); ++i) {
+    CHECK(plain.positions[i] == big.positions[i]);
+    const glm::vec2 a =
+        glm::vec2(unit * glm::vec3(plain.positions[i], 1.f)) - glm::vec2(0.5f);
+    const glm::vec2 b =
+        glm::vec2(quadruple * glm::vec3(big.positions[i], 1.f)) -
+        glm::vec2(0.5f);
     CHECK(std::fabs(b.x - a.x * 4.f) < 1e-3f);
     CHECK(std::fabs(b.y - a.y * 4.f) < 1e-3f);
   }
@@ -349,7 +360,7 @@ TEST_CASE("live2d: every masked model in a frame gets its own atlas") {
   Frame frame;
   CHECK(world.system.emit(world.registry, frame, {}) == 2u);
 
-  CHECK(frame.clips.size() == frame.geometry.draws.size());
+  CHECK(frame.models.size() == 2u);
   REQUIRE(frame.atlas_sizes.size() == 2u);
   const Live2DRuntime &a = world.registry.get<Live2DRuntime>(first);
   const Live2DRuntime &b = world.registry.get<Live2DRuntime>(second);
@@ -358,11 +369,11 @@ TEST_CASE("live2d: every masked model in a frame gets its own atlas") {
   usize clipped = 0;
   bool sampled_first = false;
   bool sampled_second = false;
-  for (const DrawMask &clip : frame.clips)
-    if (clip.clipped()) {
+  for (const ModelDraw &draw : frame.draws)
+    if (draw.clip.clipped()) {
       ++clipped;
-      sampled_first = sampled_first || clip.atlas == 0u;
-      sampled_second = sampled_second || clip.atlas == 1u;
+      sampled_first = sampled_first || draw.clip.atlas == 0u;
+      sampled_second = sampled_second || draw.clip.atlas == 1u;
     }
   CHECK(clipped == expected);
   CHECK(sampled_first);
@@ -370,9 +381,9 @@ TEST_CASE("live2d: every masked model in a frame gets its own atlas") {
 
   bool drew_first = false;
   bool drew_second = false;
-  for (const MaskDraw &draw : frame.masks.draws) {
-    drew_first = drew_first || draw.atlas == 0u;
-    drew_second = drew_second || draw.atlas == 1u;
+  for (const MaskShape &shape : frame.masks) {
+    drew_first = drew_first || shape.atlas == 0u;
+    drew_second = drew_second || shape.atlas == 1u;
   }
   CHECK(drew_first);
   CHECK(drew_second);
@@ -395,11 +406,11 @@ TEST_CASE("live2d: the mask budget degrades excess models without collisions") {
   const usize expected = masked_drawable_count(
       world.registry.get<Live2DRuntime>(first).asset);
   usize clipped = 0;
-  for (const DrawMask &clip : frame.clips)
-    clipped += clip.clipped() ? 1u : 0u;
+  for (const ModelDraw &draw : frame.draws)
+    clipped += draw.clip.clipped() ? 1u : 0u;
   CHECK(clipped == expected);
-  for (const MaskDraw &draw : frame.masks.draws)
-    CHECK(draw.atlas == 0u);
+  for (const MaskShape &shape : frame.masks)
+    CHECK(shape.atlas == 0u);
 }
 
 TEST_CASE("live2d: models built on the pool emit what one thread does") {
@@ -428,42 +439,36 @@ TEST_CASE("live2d: models built on the pool emit what one thread does") {
 
   REQUIRE(serial.atlas_sizes.size() == 2u);
   CHECK(pooled.atlas_sizes.size() == serial.atlas_sizes.size());
-  REQUIRE(pooled.geometry.vertices.size() == serial.geometry.vertices.size());
-  REQUIRE(pooled.geometry.indices.size() == serial.geometry.indices.size());
-  REQUIRE(pooled.geometry.draws.size() == serial.geometry.draws.size());
-  REQUIRE(pooled.clips.size() == serial.clips.size());
-  REQUIRE(pooled.masks.vertices.size() == serial.masks.vertices.size());
-  REQUIRE(pooled.masks.draws.size() == serial.masks.draws.size());
+  REQUIRE(pooled.models.size() == serial.models.size());
+  REQUIRE(pooled.positions.size() == serial.positions.size());
+  REQUIRE(pooled.draws.size() == serial.draws.size());
+  REQUIRE(pooled.masks.size() == serial.masks.size());
 
   usize mismatched = 0;
-  for (usize i = 0; i < serial.geometry.vertices.size(); ++i)
-    if (pooled.geometry.vertices[i].position !=
-            serial.geometry.vertices[i].position ||
-        pooled.geometry.vertices[i].uv != serial.geometry.vertices[i].uv)
-      ++mismatched;
-  for (usize i = 0; i < serial.geometry.indices.size(); ++i)
-    if (pooled.geometry.indices[i] != serial.geometry.indices[i])
-      ++mismatched;
-  for (usize i = 0; i < serial.geometry.draws.size(); ++i) {
-    const auto &a = serial.geometry.draws[i];
-    const auto &b = pooled.geometry.draws[i];
-    if (a.first_index != b.first_index || a.index_count != b.index_count ||
-        a.vertex_offset != b.vertex_offset || a.texture != b.texture ||
-        a.sort_key != b.sort_key)
+  for (usize i = 0; i < serial.models.size(); ++i) {
+    const FrameModel &a = serial.models[i];
+    const FrameModel &b = pooled.models[i];
+    if (a.mesh != b.mesh || a.positions != b.positions || a.world != b.world)
       ++mismatched;
   }
-  for (usize i = 0; i < serial.clips.size(); ++i) {
-    const DrawMask &a = serial.clips[i];
-    const DrawMask &b = pooled.clips[i];
-    if (a.group != b.group || a.atlas != b.atlas || a.channel != b.channel ||
-        a.inverted != b.inverted || a.from_world != b.from_world)
+  for (usize i = 0; i < serial.positions.size(); ++i)
+    if (pooled.positions[i] != serial.positions[i])
+      ++mismatched;
+  for (usize i = 0; i < serial.draws.size(); ++i) {
+    const ModelDraw &a = serial.draws[i];
+    const ModelDraw &b = pooled.draws[i];
+    if (a.model != b.model || a.drawable != b.drawable ||
+        a.texture != b.texture || a.color != b.color || a.blend != b.blend ||
+        a.clip.group != b.clip.group || a.clip.atlas != b.clip.atlas ||
+        a.clip.channel != b.clip.channel ||
+        a.clip.inverted != b.clip.inverted || a.clip.to_mask != b.clip.to_mask)
       ++mismatched;
   }
-  for (usize i = 0; i < serial.masks.draws.size(); ++i) {
-    const MaskDraw &a = serial.masks.draws[i];
-    const MaskDraw &b = pooled.masks.draws[i];
-    if (a.first_index != b.first_index || a.vertex_offset != b.vertex_offset ||
-        a.atlas != b.atlas || a.channel != b.channel)
+  for (usize i = 0; i < serial.masks.size(); ++i) {
+    const MaskShape &a = serial.masks[i];
+    const MaskShape &b = pooled.masks[i];
+    if (a.model != b.model || a.drawable != b.drawable || a.atlas != b.atlas ||
+        a.channel != b.channel || a.to_mask != b.to_mask || a.tile != b.tile)
       ++mismatched;
   }
   CHECK(mismatched == 0u);

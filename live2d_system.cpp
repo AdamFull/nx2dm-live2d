@@ -309,7 +309,6 @@ u32 mask_texels(const MaskLayout &masks, const CanvasInfo &canvas,
 
 usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
                          const SceneView &view) {
-  static const MaskLayout NONE;
   u64 mask_bytes = 0;
   for (const u32 size : out.atlas_sizes)
     mask_bytes += nx::cast<u64>(size) * size * MASK_TEXEL_BYTES;
@@ -346,20 +345,36 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
                 : 0u;
       });
 
-  // Each model builds its draws alone, masks included, as if its masks were
-  // first in the frame's atlases. Which of them keep their masks is decided
-  // below, in order, against the frame's budget.
+  // Every model's positions have a fixed place in the frame, so each writes
+  // its own straight into it. Its draws are built alone, masks included, as if
+  // its masks were first in the frame's atlases; which of them keep their
+  // masks is decided below, in order, against the frame's budget.
+  const u32 model_base = nx::cast<u32>(out.models.size());
+  usize positions = out.positions.size();
+  for (usize i = 0; i < m_emit_count; ++i) {
+    EmitWork &work = m_emit[i];
+    const ModelMesh *const mesh = work.runtime->asset.mesh().get();
+    work.positions = nx::cast<u32>(positions);
+    positions += mesh != nullptr ? mesh->vertex_count() : 0u;
+  }
+  out.positions.resize(positions);
+
   const auto build = [&](const usize i) {
     NX_PROFILE_ZONE("live2d::build");
     EmitWork &work = m_emit[i];
-    work.local.clear();
+    work.draws.clear();
+    work.masks.clear();
     const Live2DRuntime &runtime = *work.runtime;
-    work.masks = work.wants_masks ? emit_masks(runtime.asset, runtime.masks,
-                                               work.local.masks)
-                                  : 0u;
-    work.geometry = emit_model(runtime.asset, work.view,
-                               work.wants_masks ? runtime.masks : NONE,
-                               work.local.geometry, work.local.clips);
+    const u32 model = model_base + nx::cast<u32>(i);
+    const ModelMesh *const mesh = runtime.asset.mesh().get();
+    if (mesh != nullptr)
+      copy_positions(runtime.asset, {out.positions.data() + work.positions,
+                                     mesh->vertex_count()});
+    if (work.wants_masks)
+      (void)emit_mask_shapes(runtime.asset, runtime.masks, model, work.masks);
+    (void)emit_draws(runtime.asset, work.view,
+                     work.wants_masks ? &runtime.masks : nullptr, model,
+                     work.draws);
   };
   if (m_threads != nullptr && m_threads->worker_count() > 0 && m_emit_count > 1)
     m_threads->parallel_for(0, m_emit_count, 1, build);
@@ -385,58 +400,34 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
     if (work.wants_masks && !can_mask)
       ++over_budget;
 
-    const bool masked = can_mask && work.masks > 0u;
-    if (work.wants_masks && !masked) {
-      // Built with masks it will not get: draw it again without.
-      work.local.geometry.clear();
-      work.local.clips.clear();
-      work.geometry = emit_model(runtime.asset, work.view, NONE,
-                                 work.local.geometry, work.local.clips);
-    }
-    if (work.geometry == 0u)
-      continue;
+    // A model the frame names even when it draws nothing, so each keeps the
+    // index its draws were built with.
+    out.models.push_back({.mesh = runtime.asset.mesh(),
+                          .positions = work.positions,
+                          .world = work.view.world,
+                          .camera = work.view.camera});
 
-    const u32 atlas_base = masked ? nx::cast<u32>(held_atlases) : 0u;
+    const bool masked = can_mask && !work.masks.empty() && !work.draws.empty();
+    const u32 atlas_base = nx::cast<u32>(held_atlases);
     if (masked) {
       out.atlas_sizes.insert(out.atlas_sizes.end(), count, size);
-      MaskChannel &masks = out.masks;
-      const u32 vertex_base = nx::cast<u32>(masks.vertices.size());
-      const u32 index_base = nx::cast<u32>(masks.indices.size());
-      masks.vertices.insert(masks.vertices.end(),
-                            work.local.masks.vertices.begin(),
-                            work.local.masks.vertices.end());
-      masks.indices.insert(masks.indices.end(),
-                           work.local.masks.indices.begin(),
-                           work.local.masks.indices.end());
-      for (MaskDraw draw : work.local.masks.draws) {
-        draw.first_index += index_base;
-        draw.vertex_offset += vertex_base;
-        draw.atlas += atlas_base;
-        masks.draws.push_back(draw);
+      for (MaskShape shape : work.masks) {
+        shape.atlas += atlas_base;
+        out.masks.push_back(shape);
       }
       mask_bytes += required;
     }
 
-    nxe::r2d::MeshChannel &geometry = out.geometry;
-    const u32 vertex_base = nx::cast<u32>(geometry.vertices.size());
-    const u32 index_base = nx::cast<u32>(geometry.indices.size());
-    geometry.vertices.insert(geometry.vertices.end(),
-                             work.local.geometry.vertices.begin(),
-                             work.local.geometry.vertices.end());
-    geometry.indices.insert(geometry.indices.end(),
-                            work.local.geometry.indices.begin(),
-                            work.local.geometry.indices.end());
-    for (nxe::r2d::MeshDraw draw : work.local.geometry.draws) {
-      draw.first_index += index_base;
-      draw.vertex_offset += vertex_base;
-      geometry.draws.push_back(draw);
+    // Built with masks it may not get: those it does not are drawn whole.
+    for (ModelDraw draw : work.draws) {
+      if (!masked)
+        draw.clip = {};
+      else if (draw.clip.clipped())
+        draw.clip.atlas += atlas_base;
+      out.draws.push_back(draw);
     }
-    for (DrawMask clip : work.local.clips) {
-      if (clip.clipped())
-        clip.atlas += atlas_base;
-      out.clips.push_back(clip);
-    }
-    ++drawn;
+    if (!work.draws.empty())
+      ++drawn;
   }
 
   if (over_budget > 0 && !m_budget_warned) {

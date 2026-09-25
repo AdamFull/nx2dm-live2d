@@ -121,7 +121,41 @@ void pack_mask_atlases(
   }
 }
 
-void DrawStream::build(const Frame &frame, const u32 atlas_limit) {
+namespace {
+
+// The drawable's place in its model's mesh and the frame's positions.
+void place_drawable(DrawRecord &record, const FrameModel &model,
+                    const MeshAddress &address, const u32 drawable) noexcept {
+  const ModelMesh &mesh = *model.mesh;
+  record.uvs = address.uvs;
+  record.indices = address.indices;
+  record.first_index = mesh.first_index[drawable];
+  record.first_vertex = mesh.first_vertex[drawable];
+  record.positions = model.positions;
+}
+
+[[nodiscard]] u32 index_count(const FrameModel &model,
+                              const u32 drawable) noexcept {
+  return model.mesh->first_index[drawable + 1u] -
+         model.mesh->first_index[drawable];
+}
+
+[[nodiscard]] bool names_drawable(const Frame &frame, const u32 model,
+                                  const u32 drawable) noexcept {
+  return model < frame.models.size() && frame.models[model].mesh != nullptr &&
+         drawable < frame.models[model].mesh->drawable_count();
+}
+
+[[nodiscard]] bool resident(const std::span<const MeshAddress> meshes,
+                            const u32 model) noexcept {
+  return model < meshes.size() && meshes[model].resident();
+}
+
+} // namespace
+
+void DrawStream::build(const Frame &frame,
+                       const std::span<const MeshAddress> meshes,
+                       const u32 atlas_limit) {
   records.clear();
   commands.clear();
   atlas_first.clear();
@@ -134,36 +168,45 @@ void DrawStream::build(const Frame &frame, const u32 atlas_limit) {
                       atlas_limit, tiles, atlases);
   const u32 logical = nx::cast<u32>(tiles.size());
   const u32 physical = nx::cast<u32>(atlases.size());
+  const auto drawable = [&](const u32 model, const u32 index) {
+    return resident(meshes, model) && names_drawable(frame, model, index);
+  };
 
-  const usize models = frame.geometry.draws.size();
-  records.reserve(models + (masking ? frame.masks.draws.size() : 0u));
+  records.reserve(frame.draws.size() + (masking ? frame.masks.size() : 0u));
   commands.reserve(records.capacity());
-  for (usize i = 0; i < models; ++i) {
-    const r2d::MeshDraw &draw = frame.geometry.draws[i];
-    const DrawMask &clip = i < frame.clips.size() ? frame.clips[i] : DrawMask{};
+  for (const ModelDraw &draw : frame.draws) {
+    if (!drawable(draw.model, draw.drawable))
+      continue;
+    const FrameModel &model = frame.models[draw.model];
+    const usize slot = records.size();
     DrawRecord &record = records.emplace_back();
-    put_affine(record, clip.from_world);
-    record.channel = channel_vector(clip.channel);
-    record.index_offset = draw.first_index;
-    record.vertex_offset = draw.vertex_offset;
+    place_drawable(record, model, meshes[draw.model], draw.drawable);
+    put_affine(record, draw.clip.to_mask);
+    record.world0 =
+        glm::vec4(model.world[0][0], model.world[1][0], model.world[2][0], 0.f);
+    record.world1 =
+        glm::vec4(model.world[0][1], model.world[1][1], model.world[2][1], 0.f);
+    record.channel = channel_vector(draw.clip.channel);
     record.texture = nx_texture_2d<float4>(draw.texture);
-    record.camera = draw.camera;
-    const bool clipped = clip.clipped() && clip.atlas < logical;
-    record.mask = clipped ? tiles[clip.atlas].atlas : NO_MASK;
-    record.inverted = clipped && clip.inverted ? 1u : 0u;
+    record.camera = model.camera;
+    record.color = draw.color;
+    const bool clipped = draw.clip.clipped() && draw.clip.atlas < logical;
+    record.mask = clipped ? tiles[draw.clip.atlas].atlas : NO_MASK;
+    record.inverted = clipped && draw.clip.inverted ? 1u : 0u;
     if (clipped)
-      place_in_uv(record, tiles[clip.atlas]);
-    commands.push_back(command(draw.index_count, i));
+      place_in_uv(record, tiles[draw.clip.atlas]);
+    commands.push_back(command(index_count(model, draw.drawable), slot));
   }
   if (physical == 0u)
     return;
 
   // Masks only add, so grouping them by atlas cannot change what they draw.
+  const u32 models = nx::cast<u32>(records.size());
   atlas_first.resize(physical + 1u, 0u);
-  for (const MaskDraw &draw : frame.masks.draws)
-    if (draw.atlas < logical)
-      ++atlas_first[tiles[draw.atlas].atlas + 1u];
-  atlas_first[0] = nx::cast<u32>(models);
+  for (const MaskShape &shape : frame.masks)
+    if (shape.atlas < logical && drawable(shape.model, shape.drawable))
+      ++atlas_first[tiles[shape.atlas].atlas + 1u];
+  atlas_first[0] = models;
   for (u32 a = 1; a <= physical; ++a)
     atlas_first[a] += atlas_first[a - 1u];
 
@@ -173,31 +216,31 @@ void DrawStream::build(const Frame &frame, const u32 atlas_limit) {
   nx::small_vector<u32, MAX_MASK_ATLASES> next;
   for (u32 a = 0; a < physical; ++a)
     next.push_back(atlas_first[a]);
-  for (const MaskDraw &draw : frame.masks.draws) {
-    if (draw.atlas >= logical)
+  for (const MaskShape &shape : frame.masks) {
+    if (shape.atlas >= logical || !drawable(shape.model, shape.drawable))
       continue;
-    const u32 slot = next[tiles[draw.atlas].atlas]++;
+    const FrameModel &model = frame.models[shape.model];
+    const u32 slot = next[tiles[shape.atlas].atlas]++;
     DrawRecord &record = records[slot];
     record = {};
-    put_affine(record, draw.to_mask);
-    record.channel = channel_vector(draw.channel);
-    record.tile = draw.tile;
-    record.index_offset = draw.first_index;
-    record.vertex_offset = draw.vertex_offset;
-    record.texture = nx_texture_2d<float4>(draw.texture);
-    place_in_clip(record, tiles[draw.atlas]);
-    commands[slot] = command(draw.index_count, slot);
+    place_drawable(record, model, meshes[shape.model], shape.drawable);
+    put_affine(record, shape.to_mask);
+    record.channel = channel_vector(shape.channel);
+    record.tile = shape.tile;
+    record.texture = nx_texture_2d<float4>(shape.texture);
+    place_in_clip(record, tiles[shape.atlas]);
+    commands[slot] = command(index_count(model, shape.drawable), slot);
   }
 }
 
 bool ModelRenderer::init(rhi::Device &device, const u32 sampler) {
   static constexpr nx::string_view ARRAYS[] = {
-      "live2d vertices",     "live2d indices", "live2d mask vertices",
-      "live2d mask indices", "live2d draws",   "live2d draw commands"};
+      "live2d positions", "live2d draws", "live2d draw commands"};
   static_assert(nx::array_size(ARRAYS) == ARRAY_COUNT);
   if (!m_ring.init(&device, ARRAYS)) {
     return false;
   }
+  m_device = &device;
   m_sampler = sampler;
   return true;
 }
@@ -206,12 +249,98 @@ void ModelRenderer::set_atlas_limit(const u32 limit) noexcept {
   m_atlas_limit = nx::max(limit, 1u);
 }
 
+void ModelRenderer::release(CachedMesh &cached) noexcept {
+  if (m_device != nullptr) {
+    if (cached.uvs.valid())
+      m_device->destroy_buffer(cached.uvs);
+    if (cached.indices.valid())
+      m_device->destroy_buffer(cached.indices);
+  }
+  cached = {};
+}
+
+void ModelRenderer::release_unused() noexcept {
+  for (usize i = 0; i < m_meshes.size();) {
+    if (m_meshes[i].used + KEEP_FRAMES >= m_frame) {
+      ++i;
+      continue;
+    }
+    release(m_meshes[i]);
+    m_meshes[i] = std::move(m_meshes.back());
+    m_meshes.pop_back();
+  }
+}
+
+MeshAddress
+ModelRenderer::resolve(const nx::shared_ptr<const ModelMesh> &mesh) {
+  if (mesh == nullptr || m_device == nullptr)
+    return {};
+  rhi::Uploader &uploader = m_device->uploader();
+  // Published only once its copy has landed: until then a frame's submission
+  // need not wait for it, and the model draws nothing.
+  const auto publish = [&](CachedMesh &cached) {
+    if (!cached.resident)
+      cached.resident = uploader.is_complete(cached.uv_upload) &&
+                        uploader.is_complete(cached.index_upload);
+    return cached.resident ? cached.address : MeshAddress{};
+  };
+  for (CachedMesh &cached : m_meshes)
+    if (cached.mesh.get() == mesh.get()) {
+      cached.used = m_frame;
+      return publish(cached);
+    }
+
+  // Device local: written once when the model first draws, then read by every
+  // vertex of every frame it is on screen.
+  const auto upload = [&](const nx::string_view name, const void *const data,
+                          const u64 bytes, rhi::UploadTicket &ticket) {
+    const rhi::BufferHandle buffer = m_device->create_buffer({
+        .name = name,
+        .size = nx::max<u64>(bytes, 16u),
+        .usage = rhi::BufferUsage::Storage | rhi::BufferUsage::DeviceAddress |
+                 rhi::BufferUsage::CopyDst,
+        .memory = rhi::MemoryUsage::DeviceLocal,
+    });
+    if (!buffer.valid())
+      return buffer;
+    ticket = uploader.upload_buffer(
+        buffer, 0, {static_cast<const u8 *>(data), nx::cast<usize>(bytes)});
+    if (!ticket.ok()) {
+      m_device->destroy_buffer(buffer);
+      return rhi::BufferHandle{};
+    }
+    return buffer;
+  };
+
+  CachedMesh cached;
+  cached.mesh = mesh;
+  cached.used = m_frame;
+  cached.uvs = upload("live2d uvs", mesh->uvs.data(),
+                      nx::cast<u64>(mesh->uvs.size()) * sizeof(glm::vec2),
+                      cached.uv_upload);
+  cached.indices = upload("live2d indices", mesh->indices.data(),
+                          nx::cast<u64>(mesh->indices.size()) * sizeof(u32),
+                          cached.index_upload);
+  if (!cached.uvs.valid() || !cached.indices.valid()) {
+    release(cached);
+    return {};
+  }
+  cached.address = {m_device->buffer_address(cached.uvs),
+                    m_device->buffer_address(cached.indices)};
+  m_meshes.push_back(std::move(cached));
+  return publish(m_meshes.back());
+}
+
 void ModelRenderer::shutdown() {
+  for (CachedMesh &cached : m_meshes)
+    release(cached);
+  m_meshes.clear();
   for (rhi::PipelineHandle &pipeline : m_model_pipeline)
     pipeline = {};
   m_mask_pipeline = {};
   m_format = rhi::Format::Unknown;
   m_ring.shutdown();
+  m_device = nullptr;
 }
 
 void ModelRenderer::set_pipelines(
@@ -230,22 +359,28 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
                          const rg::TextureId target, const rhi::Format format,
                          const u64 cameras, const Frame &frame) {
   NX_PROFILE_ZONE("live2d::draw");
+  ++m_frame;
+  release_unused();
   if (frame.empty() || !ready() || !target.valid())
     return;
   if (format != m_format)
     return;
 
+  m_addresses.clear();
+  for (const FrameModel &model : frame.models)
+    m_addresses.push_back(resolve(model.mesh));
+
   m_ring.next_frame();
-  const u64 vertices = m_ring.write(
-      MODEL_VERTICES, frame.geometry.vertices.data(),
-      nx::cast<u64>(frame.geometry.vertices.size()) * sizeof(r2d::MeshVertex));
-  const u64 indices =
-      m_ring.write(MODEL_INDICES, frame.geometry.indices.data(),
-                   nx::cast<u64>(frame.geometry.indices.size()) * sizeof(u32));
-  if (vertices == 0 || indices == 0)
+  const u64 positions =
+      m_ring.write(POSITIONS, frame.positions.data(),
+                   nx::cast<u64>(frame.positions.size()) * sizeof(glm::vec2));
+  if (positions == 0)
     return;
 
-  m_stream.build(frame, m_atlas_limit);
+  m_stream.build(frame, {m_addresses.data(), m_addresses.size()},
+                 m_atlas_limit);
+  if (m_stream.records.empty())
+    return;
   const u64 draws =
       m_ring.write(DRAWS, m_stream.records.data(),
                    nx::cast<u64>(m_stream.records.size()) * sizeof(DrawRecord));
@@ -255,28 +390,15 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
     return;
   const rhi::BufferHandle commands = m_ring.buffer(COMMANDS);
 
-  u64 mask_vertices = 0;
-  u64 mask_indices = 0;
   nx::small_vector<rg::TextureId, MAX_MASK_ATLASES> atlases;
-  if (!m_stream.atlas_first.empty()) {
-    mask_vertices = m_ring.write(MASK_VERTICES, frame.masks.vertices.data(),
-                                 nx::cast<u64>(frame.masks.vertices.size()) *
-                                     sizeof(r2d::MeshVertex));
-    mask_indices =
-        m_ring.write(MASK_INDICES, frame.masks.indices.data(),
-                     nx::cast<u64>(frame.masks.indices.size()) * sizeof(u32));
-    if (mask_vertices == 0 || mask_indices == 0)
-      return;
-
-    for (const glm::uvec2 extent : m_stream.atlases)
-      atlases.push_back(graph.create({
-          .name = "live2d masks",
-          .format = rhi::Format::RGBA8_UNORM,
-          .width = extent.x,
-          .height = extent.y,
-          .usage = rhi::TextureUsage::RenderTarget | rhi::TextureUsage::Sampled,
-      }));
-  }
+  for (const glm::uvec2 extent : m_stream.atlases)
+    atlases.push_back(graph.create({
+        .name = "live2d masks",
+        .format = rhi::Format::RGBA8_UNORM,
+        .width = extent.x,
+        .height = extent.y,
+        .usage = rhi::TextureUsage::RenderTarget | rhi::TextureUsage::Sampled,
+    }));
 
   for (usize atlas_index = 0; atlas_index < atlases.size(); ++atlas_index) {
     const rg::TextureId atlas = atlases[atlas_index];
@@ -288,8 +410,7 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
         rg::SetupFn([atlas](rg::Builder &builder) {
           builder.color(0, atlas, rhi::clear_color(0.f, 0.f, 0.f, 0.f));
         }),
-        rg::ExecuteFn([this, commands, mask_vertices, mask_indices, draws,
-                       extent, first,
+        rg::ExecuteFn([this, commands, positions, draws, extent, first,
                        count](rhi::CommandContext &cmd, const rg::Resources &) {
           cmd.set_viewport({.width = nx::cast<f32>(extent.x),
                             .height = nx::cast<f32>(extent.y)});
@@ -298,8 +419,7 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
             return;
           cmd.bind_pipeline(m_mask_pipeline);
           PushBlock push;
-          push.vertices = mask_vertices;
-          push.indices = mask_indices;
+          push.positions = positions;
           push.draws = draws;
           cmd.push_constants(&push, sizeof(push));
           for (u32 done = 0; done < count;) {
@@ -313,32 +433,38 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
         }));
   }
 
+  // Blend of each model record, in record order, for splitting the multi-draw.
+  const u32 total = m_stream.model_count();
+  nx::small_vector<r2d::MeshBlend, 256> blends;
+  blends.reserve(total);
+  for (const ModelDraw &draw : frame.draws)
+    if (names_drawable(frame, draw.model, draw.drawable))
+      blends.push_back(draw.blend);
+
   graph.add_pass(
       "live2d.model", rg::SetupFn([target, atlases](rg::Builder &builder) {
         builder.color(0, target);
         for (const rg::TextureId atlas : atlases)
           builder.sample(atlas);
       }),
-      rg::ExecuteFn([this, &device, &frame, atlases, commands, cameras,
-                     vertices, indices, draws](rhi::CommandContext &cmd,
-                                               const rg::Resources &resources) {
+      rg::ExecuteFn([this, &device, atlases, commands, cameras, positions,
+                     draws, blends = std::move(blends),
+                     total](rhi::CommandContext &cmd,
+                            const rg::Resources &resources) {
         PushBlock push;
         push.cameras = cameras;
-        push.vertices = vertices;
-        push.indices = indices;
+        push.positions = positions;
         push.draws = draws;
         for (usize a = 0; a < atlases.size(); ++a)
           push.masks[a] = nx_texture_2d<float4>(pack_texture(
               device.texture_index(resources.texture(atlases[a])), m_sampler));
 
         // Each run of draws at one blend is one multi-draw, in draw order.
-        const nx::vector<r2d::MeshDraw> &model = frame.geometry.draws;
-        const u32 total = nx::cast<u32>(model.size());
         for (u32 i = 0; i < total;) {
-          const r2d::MeshBlend blend = model[i].blend;
+          const r2d::MeshBlend blend = blends[i];
           u32 run = 1;
           while (i + run < total && run < MAX_MULTI_DRAW &&
-                 model[i + run].blend == blend)
+                 blends[i + run] == blend)
             ++run;
           cmd.bind_pipeline(m_model_pipeline[nx::cast<usize>(blend)]);
           cmd.push_constants(&push, sizeof(push));

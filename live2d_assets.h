@@ -3,6 +3,8 @@
 #include "core/foundation/core/callable.h"
 #include "core/foundation/strings/utf8_string.h"
 
+#include <glm/vec2.hpp>
+
 #include <span>
 
 namespace Live2D::Cubism::Framework {
@@ -47,6 +49,23 @@ struct CanvasInfo {
   }
 };
 
+// What Cubism never changes after load: every drawable's texture coordinates
+// (v = 0 at the top) and triangle indices, end to end. A drawable's indices
+// count from its own first vertex.
+struct ModelMesh {
+  nx::vector<glm::vec2> uvs;
+  nx::vector<u32> indices;
+  nx::vector<u32> first_vertex;
+  nx::vector<u32> first_index;
+
+  [[nodiscard]] u32 vertex_count() const noexcept {
+    return first_vertex.empty() ? 0u : first_vertex.back();
+  }
+  [[nodiscard]] u32 drawable_count() const noexcept {
+    return first_vertex.empty() ? 0u : nx::cast<u32>(first_vertex.size() - 1u);
+  }
+};
+
 class ModelAsset {
 public:
   ModelAsset() = default;
@@ -70,6 +89,10 @@ public:
   [[nodiscard]] usize drawable_count() const noexcept;
 
   [[nodiscard]] CanvasInfo canvas() const noexcept { return m_canvas; }
+
+  [[nodiscard]] const nx::shared_ptr<const ModelMesh> &mesh() const noexcept {
+    return m_mesh;
+  }
 
   [[nodiscard]] std::span<const u32> textures() const noexcept {
     return {m_textures.data(), m_textures.size()};
@@ -116,6 +139,7 @@ private:
   nx::vector<nx::string> m_lip_sync;
   nx::vector<nx::string> m_dependencies;
   CanvasInfo m_canvas;
+  nx::shared_ptr<const ModelMesh> m_mesh;
   bool m_physics = false;
   bool m_pose = false;
   bool m_eye_blink = false;

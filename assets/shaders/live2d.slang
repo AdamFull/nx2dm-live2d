@@ -4,26 +4,30 @@ import interop;
 
 static const uint NX_L2D_MASK_ATLASES = 16;
 
-// Mirrors DrawRecord in live2d_pass.h.
+// Mirrors DrawRecord in live2d_pass.h. Positions are in model space; uvs and
+// indices are the model's static mesh, uploaded once.
 struct Live2DDraw {
     float4 row0;
     float4 row1;
+    float4 world0;
+    float4 world1;
     float4 channel;
     float4 tile;
-    uint index_offset;
-    uint vertex_offset;
+    NxPtr<float2> uvs;
+    NxPtr<uint> indices;
+    uint first_index;
+    uint first_vertex;
+    uint positions;
     NxTexture2D<float4> texture;
     uint camera;
     uint mask;
     uint inverted;
-    uint _pad0;
-    uint _pad1;
+    uint color;
 };
 
 struct Live2DPush {
     NxPtr<GpuCamera2D> cameras;
-    NxPtr<GuiVertex> vertices;
-    uint* indices;
+    NxPtr<float2> positions;
     NxPtr<Live2DDraw> draws;
     NxTexture2D<float4> masks[NX_L2D_MASK_ATLASES];
 };
@@ -51,9 +55,17 @@ struct ModelOutput {
     nointerpolation uint inverted : TEXCOORD5;
 };
 
-float2 nx_l2d_affine(Live2DDraw record, float2 p) {
-    return float2(dot(record.row0.xy, p) + record.row0.z,
-                  dot(record.row1.xy, p) + record.row1.z);
+float2 nx_l2d_affine(float4 row0, float4 row1, float2 p) {
+    return float2(dot(row0.xy, p) + row0.z, dot(row1.xy, p) + row1.z);
+}
+
+// The drawable's vertex_id-th corner: its model-space position and uv.
+void nx_l2d_vertex(Live2DDraw record, uint vertex_id, out float2 position,
+                   out float2 uv) {
+    const uint vertex =
+        record.first_vertex + record.indices[record.first_index + vertex_id];
+    position = pc.positions[record.positions + vertex];
+    uv = record.uvs[vertex];
 }
 
 [shader("vertex")]
@@ -61,13 +73,14 @@ MaskOutput mask_vs(uint vertex_id: SV_VertexID,
                    uint instance_id: SV_InstanceID,
                    uint start_instance: SV_StartInstanceLocation) {
     const Live2DDraw record = pc.draws[start_instance + instance_id];
-    const uint index = pc.indices[record.index_offset + vertex_id];
-    const GuiVertex vertex = pc.vertices[record.vertex_offset + index];
+    float2 position;
+    float2 uv;
+    nx_l2d_vertex(record, vertex_id, position, uv);
 
     MaskOutput output;
-    const float2 clip = nx_l2d_affine(record, vertex.position);
+    const float2 clip = nx_l2d_affine(record.row0, record.row1, position);
     output.position = float4(clip.x, -clip.y, 0.0, 1.0);
-    output.uv = vertex.uv;
+    output.uv = uv;
     output.clip = clip;
     output.channel = record.channel;
     output.tile = record.tile;
@@ -95,15 +108,17 @@ ModelOutput model_vs(uint vertex_id: SV_VertexID,
                      uint instance_id: SV_InstanceID,
                      uint start_instance: SV_StartInstanceLocation) {
     const Live2DDraw record = pc.draws[start_instance + instance_id];
-    const uint index = pc.indices[record.index_offset + vertex_id];
-    const GuiVertex vertex = pc.vertices[record.vertex_offset + index];
+    float2 position;
+    float2 uv;
+    nx_l2d_vertex(record, vertex_id, position, uv);
     const GpuCamera2D cam = pc.cameras[record.camera];
+    const float2 world = nx_l2d_affine(record.world0, record.world1, position);
 
     ModelOutput output;
-    output.position = mul(cam.view_proj, float4(vertex.position, 0.0, 1.0));
-    output.color = nx_unpack_rgba8(vertex.color);
-    output.uv = vertex.uv;
-    output.mask_uv = nx_l2d_affine(record, vertex.position);
+    output.position = mul(cam.view_proj, float4(world, 0.0, 1.0));
+    output.color = nx_unpack_rgba8(record.color);
+    output.uv = uv;
+    output.mask_uv = nx_l2d_affine(record.row0, record.row1, position);
     output.channel = record.channel;
     output.texture = record.texture;
     output.mask = record.mask;

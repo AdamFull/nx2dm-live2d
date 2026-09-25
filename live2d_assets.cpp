@@ -93,6 +93,30 @@ struct LoadedResource {
   return out;
 }
 
+[[nodiscard]] nx::shared_ptr<const ModelMesh>
+build_mesh(csm::CubismModel &model) {
+  nx::shared_ptr<ModelMesh> mesh = nx::make_shared<ModelMesh>();
+  const i32 count = nx::max(model.GetDrawableCount(), 0);
+  mesh->first_vertex.reserve(nx::cast<usize>(count) + 1u);
+  mesh->first_index.reserve(nx::cast<usize>(count) + 1u);
+  mesh->first_vertex.push_back(0u);
+  mesh->first_index.push_back(0u);
+  for (i32 d = 0; d < count; ++d) {
+    const core::csmVector2 *const uvs = model.GetDrawableVertexUvs(d);
+    const csm::csmUint16 *const indices = model.GetDrawableVertexIndices(d);
+    const i32 vertices = uvs != nullptr ? model.GetDrawableVertexCount(d) : 0;
+    const i32 triangles =
+        indices != nullptr ? model.GetDrawableVertexIndexCount(d) : 0;
+    for (i32 v = 0; v < vertices; ++v)
+      mesh->uvs.push_back({uvs[v].X, 1.f - uvs[v].Y});
+    for (i32 i = 0; i < triangles; ++i)
+      mesh->indices.push_back(indices[i]);
+    mesh->first_vertex.push_back(nx::cast<u32>(mesh->uvs.size()));
+    mesh->first_index.push_back(nx::cast<u32>(mesh->indices.size()));
+  }
+  return mesh;
+}
+
 } // namespace
 
 ModelAsset::~ModelAsset() { reset(); }
@@ -104,8 +128,8 @@ ModelAsset::ModelAsset(ModelAsset &&other) noexcept
       m_missing(std::move(other.m_missing)),
       m_lip_sync(std::move(other.m_lip_sync)),
       m_dependencies(std::move(other.m_dependencies)), m_canvas(other.m_canvas),
-      m_physics(other.m_physics), m_pose(other.m_pose),
-      m_eye_blink(other.m_eye_blink) {
+      m_mesh(std::move(other.m_mesh)), m_physics(other.m_physics),
+      m_pose(other.m_pose), m_eye_blink(other.m_eye_blink) {
   other.m_owner = nullptr;
 }
 
@@ -120,6 +144,7 @@ ModelAsset &ModelAsset::operator=(ModelAsset &&other) noexcept {
     m_lip_sync = std::move(other.m_lip_sync);
     m_dependencies = std::move(other.m_dependencies);
     m_canvas = other.m_canvas;
+    m_mesh = std::move(other.m_mesh);
     m_physics = other.m_physics;
     m_pose = other.m_pose;
     m_eye_blink = other.m_eye_blink;
@@ -145,6 +170,7 @@ void ModelAsset::reset() noexcept {
   m_lip_sync.clear();
   m_dependencies.clear();
   m_canvas = {};
+  m_mesh = {};
   m_physics = false;
   m_pose = false;
   m_eye_blink = false;
@@ -324,6 +350,7 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
         &size, &origin, &units);
     out.m_canvas = {size.X, size.Y, origin.X, origin.Y, units};
   }
+  out.m_mesh = build_mesh(*owner->GetModel());
 
   const auto read_optional = [&](const nx::string_view name,
                                  nx::string &path_out) {

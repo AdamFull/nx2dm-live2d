@@ -95,9 +95,9 @@ private:
     ModelView view;
     bool wants_masks = false;
     u32 mask_size = 0;
-    Frame local;
-    usize geometry = 0;
-    usize masks = 0;
+    u32 positions = 0;
+    nx::vector<ModelDraw> draws;
+    nx::vector<MaskShape> masks;
   };
 
   [[nodiscard]] u32 mask_resolution(u32 requested) const noexcept;

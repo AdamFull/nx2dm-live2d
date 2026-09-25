@@ -1,5 +1,6 @@
 #include "live2d/live2d_draw.h"
 
+#include "core/foundation/containers/small_vector.h"
 #include "core/foundation/diagnostics/log.h"
 #include "rendering/render2d/render_interop.h"
 #include "rendering/render2d/scene_renderer.h"
@@ -8,7 +9,7 @@
 #include <Rendering/csmBlendMode.hpp>
 
 #include <algorithm>
-#include <cmath>
+#include <cstring>
 
 namespace nxm::live2d {
 namespace {
@@ -49,10 +50,6 @@ namespace core = Live2D::Cubism::Core;
   return screen.X > EPSILON || screen.Y > EPSILON || screen.Z > EPSILON;
 }
 
-[[nodiscard]] glm::vec2 flip_v(const glm::vec2 uv) noexcept {
-  return {uv.x, 1.f - uv.y};
-}
-
 static_assert(sizeof(core::csmVector2) == sizeof(glm::vec2));
 static_assert(alignof(core::csmVector2) == alignof(glm::vec2));
 
@@ -63,40 +60,6 @@ static_assert(alignof(core::csmVector2) == alignof(glm::vec2));
   out[2] = glm::vec3(m[3][0], m[3][1], 1.f);
   return out;
 }
-
-[[nodiscard]] bool invert_affine(const glm::mat3 &m, glm::mat3 &out) noexcept {
-  const f32 a = m[0][0];
-  const f32 b = m[1][0];
-  const f32 c = m[0][1];
-  const f32 d = m[1][1];
-  const f32 det = a * d - b * c;
-  if (std::fabs(det) < 1e-12f)
-    return false;
-
-  const f32 inv = 1.f / det;
-  out = glm::mat3(1.f);
-  out[0] = glm::vec3(d * inv, -c * inv, 0.f);
-  out[1] = glm::vec3(-b * inv, a * inv, 0.f);
-  out[2] = glm::vec3(-(out[0][0] * m[2][0] + out[1][0] * m[2][1]),
-                     -(out[0][1] * m[2][0] + out[1][1] * m[2][1]), 1.f);
-  return true;
-}
-
-[[nodiscard]] DrawMask clip_of(const MaskLayout &masks, const i32 drawable,
-                               const glm::mat3 &inverse_world,
-                               const u32 atlas_base) noexcept {
-  const MaskRef &ref = masks.of(drawable);
-  if (!ref.clipped())
-    return {};
-  return {
-      .group = ref.group,
-      .atlas = atlas_base + ref.atlas,
-      .channel = ref.channel,
-      .inverted = ref.inverted,
-      .from_world = affine_of(ref.to_mask) * inverse_world,
-  };
-}
-
 }
 
 DrawableMesh drawable_mesh(const ModelAsset &asset,
@@ -152,75 +115,40 @@ usize masked_drawable_count(const ModelAsset &asset) noexcept {
   return masked;
 }
 
-usize emit_masks(const ModelAsset &asset, const MaskLayout &masks,
-                 MaskChannel &out, const u32 atlas_base) {
-  const csm::CubismModel *const model = asset.model();
-  if (model == nullptr)
-    return 0u;
-  auto *const m = const_cast<csm::CubismModel *>(model);
-  const std::span<const u32> textures = asset.textures();
-
-  nx::vector<r2d::MeshVertex> vertices;
-  nx::vector<u32> indices;
-  usize appended = 0;
-
-  for (usize g = 0; g < masks.groups().size(); ++g) {
-    const MaskGroup &group = masks.groups()[g];
-    for (const i32 shape : group.shapes) {
-      const DrawableMesh mesh = drawable_mesh(asset, shape);
-      if (!mesh.valid())
-        continue;
-      const u32 color = pack_color(glm::vec4(1.f, 1.f, 1.f, 1.f));
-
-      vertices.clear();
-      vertices.reserve(mesh.positions.size());
-      for (usize v = 0; v < mesh.positions.size(); ++v)
-        vertices.push_back({mesh.positions[v], flip_v(mesh.uvs[v]), color});
-
-      indices.clear();
-      indices.reserve(mesh.indices.size());
-      for (const u16 index : mesh.indices)
-        indices.push_back(nx::cast<u32>(index));
-
-      MaskDraw draw;
-      draw.first_index = nx::cast<u32>(out.indices.size());
-      draw.index_count = nx::cast<u32>(indices.size());
-      draw.vertex_offset = nx::cast<u32>(out.vertices.size());
-      const i32 page = m->GetDrawableTextureIndex(shape);
-      draw.texture = page >= 0 && nx::cast<usize>(page) < textures.size()
-                         ? textures[nx::cast<usize>(page)]
-                         : pack_texture(NX_TEXTURE_NONE, 0);
-      draw.atlas = atlas_base + group.atlas;
-      draw.channel = group.channel;
-      draw.to_mask = affine_of(group.to_mask);
-      draw.tile = group.tile;
-
-      out.vertices.insert(out.vertices.end(), vertices.begin(), vertices.end());
-      out.indices.insert(out.indices.end(), indices.begin(), indices.end());
-      out.draws.push_back(draw);
-      ++appended;
-    }
-  }
-  return appended;
-}
-
 namespace {
 
-usize emit(const ModelAsset &asset, const ModelView &view,
-           r2d::MeshChannel &out, const MaskLayout *const masks,
-           nx::vector<DrawMask> *const out_masks, const u32 atlas_base) {
+[[nodiscard]] u32 texture_of(const ModelAsset &asset, csm::CubismModel &model,
+                             const i32 drawable) {
+  const std::span<const u32> textures = asset.textures();
+  const i32 page = model.GetDrawableTextureIndex(drawable);
+  return page >= 0 && nx::cast<usize>(page) < textures.size()
+             ? textures[nx::cast<usize>(page)]
+             : pack_texture(NX_TEXTURE_NONE, 0);
+}
+
+struct Drawn {
+  i32 drawable = 0;
+  u32 color = 0;
+  u32 texture = 0;
+  r2d::MeshBlend blend = r2d::MeshBlend::Normal;
+};
+
+// Visits the visible drawables in render order with what every emitter needs.
+template <class Visit>
+usize walk(const ModelAsset &asset, const ModelView &view, Visit &&visit) {
   const csm::CubismModel *const model = asset.model();
-  if (model == nullptr)
+  const ModelMesh *const mesh = asset.mesh().get();
+  if (model == nullptr || mesh == nullptr)
     return 0u;
   auto *const m = const_cast<csm::CubismModel *>(model);
 
   const i32 *const order = m->GetRenderOrders();
-  const i32 *const mask_counts = m->GetDrawableMaskCounts();
-  const i32 count = m->GetDrawableCount();
+  const i32 count =
+      nx::min(m->GetDrawableCount(), nx::cast<i32>(mesh->drawable_count()));
   if (order == nullptr || count <= 0)
     return 0u;
 
-  nx::vector<i32> sorted;
+  nx::small_vector<i32, 256> sorted;
   sorted.reserve(nx::cast<usize>(count));
   for (i32 d = 0; d < count; ++d)
     sorted.push_back(d);
@@ -228,94 +156,33 @@ usize emit(const ModelAsset &asset, const ModelView &view,
       sorted.begin(), sorted.end(),
       [order](const i32 a, const i32 b) { return order[a] < order[b]; });
 
-  const u32 layer =
-      nx::cast<u32>(nx::clamp(view.layer, -32768, 32767) + 32768);
-  const u32 key = nx_make_sort_key(
-      layer,
-      r2d::quantize_depth(view.world[2][1], view.depth_min, view.depth_max),
-      0u);
   const f32 model_opacity = m->GetModelOpacity();
-  const std::span<const u32> textures = asset.textures();
-
-  glm::mat3 inverse_world(1.f);
-  const bool can_clip =
-      masks != nullptr && invert_affine(view.world, inverse_world);
-  if (masks != nullptr && !can_clip)
-    nx::logw("live2d: the model's placement is singular; nothing can be "
-             "clipped through it");
-
-  nx::vector<r2d::MeshVertex> vertices;
-  nx::vector<u32> indices;
-  usize appended = 0;
+  usize visited = 0;
   usize screen_coloured = 0;
   usize exotic_blends = 0;
-
   for (const i32 d : sorted) {
     if (!m->GetDrawableDynamicFlagIsVisible(d))
       continue;
-    const DrawableMesh mesh = drawable_mesh(asset, d);
-    if (!mesh.valid())
+    const usize du = nx::cast<usize>(d);
+    if (mesh->first_index[du + 1u] == mesh->first_index[du] ||
+        mesh->first_vertex[du + 1u] == mesh->first_vertex[du])
       continue;
 
     if (uses_screen_colour(m->GetDrawableScreenColor(d)))
       ++screen_coloured;
-
-    const u32 color =
-        tint(m->GetDrawableMultiplyColor(d),
-             m->GetDrawableOpacity(d) * model_opacity, view.color);
-
-    vertices.clear();
-    vertices.reserve(mesh.positions.size());
-    for (usize v = 0; v < mesh.positions.size(); ++v) {
-      const f32 x = mesh.positions[v].x;
-      const f32 y = mesh.positions[v].y;
-      r2d::MeshVertex vertex;
-      vertex.position = glm::vec2(
-          view.world[0][0] * x + view.world[1][0] * y + view.world[2][0],
-          view.world[0][1] * x + view.world[1][1] * y + view.world[2][1]);
-      vertex.uv = flip_v(mesh.uvs[v]);
-      vertex.color = color;
-      vertices.push_back(vertex);
-    }
-
-    indices.clear();
-    indices.reserve(mesh.indices.size());
-    for (const u16 index : mesh.indices)
-      indices.push_back(nx::cast<u32>(index));
-
     bool exotic = false;
     csm::csmBlendMode mode = m->GetDrawableBlendModeType(d);
-    const r2d::MeshBlend blend = blend_of(mode.GetColorBlendType(), exotic);
+    Drawn drawn;
+    drawn.drawable = d;
+    drawn.blend = blend_of(mode.GetColorBlendType(), exotic);
     exotic_blends += exotic ? 1u : 0u;
-
-    const i32 page = m->GetDrawableTextureIndex(d);
-    r2d::MeshDraw &draw = out.append(vertices, indices);
-    draw.texture = page >= 0 && nx::cast<usize>(page) < textures.size()
-                       ? textures[nx::cast<usize>(page)]
-                       : pack_texture(NX_TEXTURE_NONE, 0);
-    draw.sort_key = key;
-    draw.camera = view.camera;
-    draw.blend = blend;
-    draw.batch = view.batch;
-    draw.material = view.material;
-    ++appended;
-
-    if (out_masks != nullptr)
-      out_masks->push_back(can_clip ? clip_of(*masks, d, inverse_world,
-                                              atlas_base)
-                                    : DrawMask{});
+    drawn.color = tint(m->GetDrawableMultiplyColor(d),
+                       m->GetDrawableOpacity(d) * model_opacity, view.color);
+    drawn.texture = texture_of(asset, *m, d);
+    visit(drawn, *mesh);
+    ++visited;
   }
 
-  // Once per model rather than per drawable, and at all rather than never: a
-  // face drawn without its clip is a visible defect and the log is where
-  // someone looking at one starts.
-  if (const usize masked = masks == nullptr && mask_counts != nullptr
-                               ? masked_drawable_count(asset)
-                               : 0u;
-      masked > 0)
-    nx::logw("live2d: {} of {} drawables are clipped and this path does not "
-             "mask; they will draw whole",
-             masked, appended);
   if (screen_coloured > 0)
     nx::logw("live2d: {} drawables use a screen colour, which this path "
              "ignores",
@@ -324,20 +191,132 @@ usize emit(const ModelAsset &asset, const ModelView &view,
     nx::logw("live2d: {} drawables use a blend mode beyond normal, additive, "
              "multiply and screen; they draw normally",
              exotic_blends);
-  return appended;
+  return visited;
 }
 
-}
+} // namespace
 
 usize emit_model(const ModelAsset &asset, const ModelView &view,
                  r2d::MeshChannel &out) {
-  return emit(asset, view, out, nullptr, nullptr, 0);
+  const u32 layer = nx::cast<u32>(nx::clamp(view.layer, -32768, 32767) + 32768);
+  const u32 key = nx_make_sort_key(
+      layer,
+      r2d::quantize_depth(view.world[2][1], view.depth_min, view.depth_max),
+      0u);
+
+  nx::vector<r2d::MeshVertex> vertices;
+  nx::vector<u32> indices;
+  const usize appended =
+      walk(asset, view, [&](const Drawn &drawn, const ModelMesh &mesh) {
+        const DrawableMesh source = drawable_mesh(asset, drawn.drawable);
+        const usize d = nx::cast<usize>(drawn.drawable);
+        const u32 first = mesh.first_vertex[d];
+
+        vertices.clear();
+        vertices.reserve(source.positions.size());
+        for (usize v = 0; v < source.positions.size(); ++v) {
+          const f32 x = source.positions[v].x;
+          const f32 y = source.positions[v].y;
+          r2d::MeshVertex vertex;
+          vertex.position = glm::vec2(
+              view.world[0][0] * x + view.world[1][0] * y + view.world[2][0],
+              view.world[0][1] * x + view.world[1][1] * y + view.world[2][1]);
+          vertex.uv = mesh.uvs[first + v];
+          vertex.color = drawn.color;
+          vertices.push_back(vertex);
+        }
+        indices.assign(mesh.indices.begin() + mesh.first_index[d],
+                       mesh.indices.begin() + mesh.first_index[d + 1u]);
+
+        r2d::MeshDraw &draw = out.append(vertices, indices);
+        draw.texture = drawn.texture;
+        draw.sort_key = key;
+        draw.camera = view.camera;
+        draw.blend = drawn.blend;
+        draw.batch = view.batch;
+        draw.material = view.material;
+      });
+
+  // Once per model rather than per drawable, and at all rather than never: a
+  // face drawn without its clip is a visible defect and the log is where
+  // someone looking at one starts.
+  if (const usize masked = masked_drawable_count(asset); masked > 0)
+    nx::logw("live2d: {} of {} drawables are clipped and this path does not "
+             "mask; they will draw whole",
+             masked, appended);
+  return appended;
 }
 
-usize emit_model(const ModelAsset &asset, const ModelView &view,
-                 const MaskLayout &masks, r2d::MeshChannel &out,
-                 nx::vector<DrawMask> &out_masks, const u32 atlas_base) {
-  return emit(asset, view, out, &masks, &out_masks, atlas_base);
+usize emit_draws(const ModelAsset &asset, const ModelView &view,
+                 const MaskLayout *const masks, const u32 model,
+                 nx::vector<ModelDraw> &out) {
+  return walk(asset, view, [&](const Drawn &drawn, const ModelMesh &) {
+    ModelDraw &draw = out.emplace_back();
+    draw.model = model;
+    draw.drawable = nx::cast<u32>(drawn.drawable);
+    draw.texture = drawn.texture;
+    draw.color = drawn.color;
+    draw.blend = drawn.blend;
+    if (masks == nullptr)
+      return;
+    const MaskRef &ref = masks->of(drawn.drawable);
+    if (ref.clipped())
+      draw.clip = {.group = ref.group,
+                   .atlas = ref.atlas,
+                   .channel = ref.channel,
+                   .inverted = ref.inverted,
+                   .to_mask = affine_of(ref.to_mask)};
+  });
 }
 
+void copy_positions(const ModelAsset &asset,
+                    const std::span<glm::vec2> out) noexcept {
+  const csm::CubismModel *const model = asset.model();
+  const ModelMesh *const mesh = asset.mesh().get();
+  if (model == nullptr || mesh == nullptr || out.size() < mesh->vertex_count())
+    return;
+  auto *const m = const_cast<csm::CubismModel *>(model);
+  const i32 count =
+      nx::min(m->GetDrawableCount(), nx::cast<i32>(mesh->drawable_count()));
+  for (i32 d = 0; d < count; ++d) {
+    const usize du = nx::cast<usize>(d);
+    const u32 first = mesh->first_vertex[du];
+    const u32 vertices = mesh->first_vertex[du + 1u] - first;
+    const core::csmVector2 *const points = m->GetDrawableVertexPositions(d);
+    if (vertices == 0u || points == nullptr)
+      continue;
+    std::memcpy(out.data() + first, points, vertices * sizeof(glm::vec2));
+  }
+}
+
+usize emit_mask_shapes(const ModelAsset &asset, const MaskLayout &masks,
+                       const u32 model, nx::vector<MaskShape> &out) {
+  const csm::CubismModel *const cubism = asset.model();
+  const ModelMesh *const mesh = asset.mesh().get();
+  if (cubism == nullptr || mesh == nullptr)
+    return 0u;
+  auto *const m = const_cast<csm::CubismModel *>(cubism);
+
+  usize appended = 0;
+  for (const MaskGroup &group : masks.groups()) {
+    for (const i32 shape : group.shapes) {
+      if (shape < 0 || nx::cast<u32>(shape) >= mesh->drawable_count())
+        continue;
+      const usize s = nx::cast<usize>(shape);
+      if (mesh->first_index[s + 1u] == mesh->first_index[s])
+        continue;
+      out.push_back({
+          .model = model,
+          .drawable = nx::cast<u32>(shape),
+          .texture = texture_of(asset, *m, shape),
+          .atlas = group.atlas,
+          .channel = group.channel,
+          .to_mask = affine_of(group.to_mask),
+          .tile = group.tile,
+      });
+      ++appended;
+    }
+  }
+  return appended;
+}
 }

@@ -7,11 +7,12 @@
 #include "core/foundation/platform/filesystem.h"
 #include "core/foundation/strings/format.h"
 #include "core/foundation/vfs/vfs.h"
-#include "rendering/pipeline_test_utils.h"
-#include "rendering/rhi/rhi.h"
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_draw.h"
 #include "live2d/live2d_mask.h"
+#include "live2d/live2d_pass.h"
+#include "rendering/pipeline_test_utils.h"
+#include "rendering/rhi/rhi.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -26,24 +27,6 @@ namespace rhi = nxe::rhi;
 
 constexpr u32 TARGET = 256;
 constexpr u32 ATLAS = 512;
-
-struct Live2DPush {
-  glm::vec4 mask_row0{0.f};
-  glm::vec4 mask_row1{0.f};
-  glm::vec4 channel{0.f};
-  glm::vec4 tile{-1.f, -1.f, 1.f, 1.f};
-  u64 cameras = 0;
-  u64 vertices = 0;
-  u64 indices = 0;
-  u32 index_offset = 0;
-  u32 vertex_offset = 0;
-  NxTexture2D<float4> texture{};
-  u32 camera = 0;
-  NxTexture2D<float4> mask_texture{};
-  u32 inverted = 0;
-};
-static_assert(sizeof(Live2DPush) == 112);
-static_assert(sizeof(Live2DPush) <= 128, "the guaranteed Vulkan push range");
 
 struct TestDevice {
   rhi::Device device;
@@ -74,17 +57,6 @@ struct TestDevice {
       .code_size = code->size(),
       .reflection_json = refl->view(),
   });
-}
-
-void put_affine(Live2DPush &push, const glm::mat3 &m) noexcept {
-  push.mask_row0 = glm::vec4(m[0][0], m[1][0], m[2][0], 0.f);
-  push.mask_row1 = glm::vec4(m[0][1], m[1][1], m[2][1], 0.f);
-}
-
-[[nodiscard]] glm::vec4 channel_vector(const u32 channel) noexcept {
-  glm::vec4 v(0.f);
-  v[nx::cast<int>(nx::min(channel, 3u))] = 1.f;
-  return v;
 }
 
 [[nodiscard]] usize lit(const nx::vector<u8> &pixels) noexcept {
@@ -149,21 +121,36 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   view.world[2][0] = 0.5f;
   view.world[2][1] = 0.52f;
 
-  r2d::MeshChannel model;
-  nx::vector<DrawMask> clips;
-  REQUIRE(emit_model(asset, view, masks, model, clips) > 0u);
-  REQUIRE(clips.size() == model.draws.size());
+  // The model as the system hands it over: positions, draws and mask shapes.
+  const ModelMesh &mesh = *asset.mesh();
+  Frame posed;
+  posed.models.push_back({.mesh = asset.mesh(), .world = view.world});
+  posed.positions.resize(mesh.vertex_count());
+  copy_positions(asset, posed.positions);
+  nx::vector<ModelDraw> draws;
+  REQUIRE(emit_draws(asset, view, &masks, 0, draws) > 0u);
+  REQUIRE(emit_mask_shapes(asset, masks, 0, posed.masks) > 0u);
+  posed.atlas_sizes.push_back(ATLAS);
 
-  MaskChannel shapes;
-  REQUIRE(emit_masks(asset, masks, shapes) > 0u);
-
-  usize subject = model.draws.size();
-  for (usize i = 0; i < clips.size(); ++i)
-    if (clips[i].clipped() && model.draws[i].index_count > 60u) {
+  const auto indices_of = [&](const ModelDraw &draw) {
+    return mesh.first_index[draw.drawable + 1u] -
+           mesh.first_index[draw.drawable];
+  };
+  // The first clipped drawable of some size, or failing that the largest.
+  usize subject = draws.size();
+  usize largest = draws.size();
+  for (usize i = 0; i < draws.size(); ++i) {
+    if (!draws[i].clip.clipped())
+      continue;
+    if (subject == draws.size() && indices_of(draws[i]) > 60u)
       subject = i;
-      break;
-    }
-  REQUIRE(subject < model.draws.size());
+    if (largest == draws.size() ||
+        indices_of(draws[i]) > indices_of(draws[largest]))
+      largest = i;
+  }
+  if (subject == draws.size())
+    subject = largest;
+  REQUIRE(subject < draws.size());
 
   const rhi::TextureHandle atlas = device.create_texture({
       .name = "live2d masks",
@@ -217,7 +204,8 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
     const rhi::BufferHandle b = device.create_buffer({
         .name = name,
         .size = bytes,
-        .usage = rhi::BufferUsage::Storage | rhi::BufferUsage::DeviceAddress,
+        .usage = rhi::BufferUsage::Storage | rhi::BufferUsage::DeviceAddress |
+                 rhi::BufferUsage::Indirect,
         .memory = rhi::MemoryUsage::Upload,
         .persistently_mapped = true,
     });
@@ -227,18 +215,17 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   };
   const rhi::BufferHandle cameras =
       upload("live2d cameras", &camera, sizeof(camera));
-  const rhi::BufferHandle model_vertices =
-      upload("live2d model vertices", model.vertices.data(),
-             nx::cast<u64>(model.vertices.size()) * sizeof(r2d::MeshVertex));
-  const rhi::BufferHandle model_indices =
-      upload("live2d model indices", model.indices.data(),
-             nx::cast<u64>(model.indices.size()) * sizeof(u32));
-  const rhi::BufferHandle mask_vertices =
-      upload("live2d mask vertices", shapes.vertices.data(),
-             nx::cast<u64>(shapes.vertices.size()) * sizeof(r2d::MeshVertex));
-  const rhi::BufferHandle mask_indices =
-      upload("live2d mask indices", shapes.indices.data(),
-             nx::cast<u64>(shapes.indices.size()) * sizeof(u32));
+  const rhi::BufferHandle positions =
+      upload("live2d positions", posed.positions.data(),
+             nx::cast<u64>(posed.positions.size()) * sizeof(glm::vec2));
+  const rhi::BufferHandle uvs =
+      upload("live2d uvs", mesh.uvs.data(),
+             nx::cast<u64>(mesh.uvs.size()) * sizeof(glm::vec2));
+  const rhi::BufferHandle indices =
+      upload("live2d indices", mesh.indices.data(),
+             nx::cast<u64>(mesh.indices.size()) * sizeof(u32));
+  const MeshAddress address = {.uvs = device.buffer_address(uvs),
+                               .indices = device.buffer_address(indices)};
 
   const rhi::SamplerHandle sampler = device.create_sampler({
       .name = "live2d mask",
@@ -256,6 +243,28 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   usize covered[4] = {};
 
   for (u32 pass = 0; pass < PassCount; ++pass) {
+    // The subject alone, drawn and clipped the way the renderer does: one
+    // record per draw, named by the indirect command's first instance.
+    Frame frame = posed;
+    ModelDraw draw = draws[subject];
+    if (pass == Unclipped)
+      draw.clip = {};
+    draw.clip.inverted = pass == Inverted;
+    frame.draws.push_back(draw);
+
+    DrawStream stream;
+    stream.build(frame, {&address, 1u}, ATLAS);
+    REQUIRE(stream.atlases.size() == 1u);
+    REQUIRE(stream.atlases[0] == glm::uvec2(ATLAS));
+    const rhi::BufferHandle records =
+        upload("live2d records", stream.records.data(),
+               nx::cast<u64>(stream.records.size()) * sizeof(DrawRecord));
+    const rhi::BufferHandle commands =
+        upload("live2d commands", stream.commands.data(),
+               nx::cast<u64>(stream.commands.size()) *
+                   sizeof(rhi::DrawIndirectCommand));
+    constexpr u64 STRIDE = sizeof(rhi::DrawIndirectCommand);
+
     rhi::CommandContext cmd;
     REQUIRE(device.begin_headless_frame(cmd));
 
@@ -274,18 +283,14 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
         {.width = nx::cast<f32>(ATLAS), .height = nx::cast<f32>(ATLAS)});
     cmd.set_scissor({{0, 0}, {ATLAS, ATLAS}});
     cmd.bind_pipeline(mask_pipeline);
-    for (const MaskDraw &draw : shapes.draws) {
-      Live2DPush push;
-      put_affine(push, draw.to_mask);
-      push.channel = channel_vector(draw.channel);
-      push.tile = draw.tile;
-      push.vertices = device.buffer_address(mask_vertices);
-      push.indices = device.buffer_address(mask_indices);
-      push.index_offset = draw.first_index;
-      push.vertex_offset = draw.vertex_offset;
-      push.texture = nx_texture_2d<float4>(draw.texture);
+    {
+      PushBlock push;
+      push.positions = device.buffer_address(positions);
+      push.draws = device.buffer_address(records);
       cmd.push_constants(&push, sizeof(push));
-      cmd.draw(draw.index_count);
+      const u32 first = stream.atlas_first[0];
+      cmd.draw_indirect(commands, first * STRIDE, stream.atlas_first[1] - first,
+                        STRIDE);
     }
     cmd.end_render_pass();
     cmd.barrier(rhi::TextureBarrier{.texture = atlas,
@@ -308,23 +313,13 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
     cmd.set_scissor({{0, 0}, {TARGET, TARGET}});
     cmd.bind_pipeline(model_pipeline);
     {
-      const r2d::MeshDraw &draw = model.draws[subject];
-      const DrawMask &clip = clips[subject];
-      Live2DPush push;
-      put_affine(push, clip.from_world);
-      push.channel = channel_vector(clip.channel);
+      PushBlock push;
       push.cameras = device.buffer_address(cameras);
-      push.vertices = device.buffer_address(model_vertices);
-      push.indices = device.buffer_address(model_indices);
-      push.index_offset = draw.first_index;
-      push.vertex_offset = draw.vertex_offset;
-      push.texture = nx_texture_2d<float4>(draw.texture);
-      push.camera = draw.camera;
-      push.mask_texture = nx_texture_2d<float4>(
-          pass == Unclipped ? pack_texture(NX_TEXTURE_NONE, 0) : atlas_packed);
-      push.inverted = pass == Inverted ? 1u : 0u;
+      push.positions = device.buffer_address(positions);
+      push.draws = device.buffer_address(records);
+      push.masks[0] = nx_texture_2d<float4>(atlas_packed);
       cmd.push_constants(&push, sizeof(push));
-      cmd.draw(draw.index_count);
+      cmd.draw_indirect(commands, 0, stream.model_count(), STRIDE);
     }
     cmd.end_render_pass();
     cmd.barrier(rhi::TextureBarrier{.texture = target,
@@ -332,6 +327,8 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
                                     .to = rhi::ResourceState::CopySrc});
     REQUIRE(device.end_headless_frame());
     device.wait_idle();
+    device.destroy_buffer(commands);
+    device.destroy_buffer(records);
 
     if (pass == Clipped) {
       const rhi::ReadbackResult mask = device.uploader().read_texture(atlas);
@@ -379,10 +376,9 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   CHECK(either(frames[Clipped], frames[Inverted]) > whole * 95u / 100u);
   CHECK(both(frames[Clipped], frames[Inverted]) < whole / 10u);
 
-  device.destroy_buffer(mask_indices);
-  device.destroy_buffer(mask_vertices);
-  device.destroy_buffer(model_indices);
-  device.destroy_buffer(model_vertices);
+  device.destroy_buffer(indices);
+  device.destroy_buffer(uvs);
+  device.destroy_buffer(positions);
   device.destroy_buffer(cameras);
   device.destroy_pipeline(model_pipeline);
   device.destroy_pipeline(mask_pipeline);
