@@ -382,7 +382,8 @@ bool gather_model(const nx::string_view model3_path, ModelReader &reader,
   return true;
 }
 
-void resolve_textures(ModelAsset &asset, const TextureResolver &resolve) {
+usize resolve_textures(ModelAsset &asset, const TextureResolver &resolve) {
+  usize changed = 0;
   for (usize i = 0;
        i < asset.m_texture_paths.size() && i < asset.m_textures.size(); ++i) {
     const nx::string &path = asset.m_texture_paths[i];
@@ -390,11 +391,10 @@ void resolve_textures(ModelAsset &asset, const TextureResolver &resolve) {
       continue;
     const u32 packed =
         resolve ? resolve(path.view()) : pack_texture(NX_TEXTURE_NONE, 0);
-    if ((packed >> 16) == NX_TEXTURE_NONE)
-      nx::logw("live2d: no texture for '{}'; its drawables will be untextured",
-               path);
+    changed += asset.m_textures[i] != packed ? 1u : 0u;
     asset.m_textures[i] = packed;
   }
+  return changed;
 }
 
 bool load_model(const nx::string_view model3_path, TextureResolver resolve,
@@ -407,7 +407,7 @@ bool load_model(const nx::string_view model3_path, TextureResolver resolve,
   }
   if (!build_model(source, out, error, mocs))
     return false;
-  resolve_textures(out, resolve);
+  (void)resolve_textures(out, resolve);
   return true;
 }
 

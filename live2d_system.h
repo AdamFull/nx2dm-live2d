@@ -58,7 +58,10 @@ public:
   usize load_pending(nxe::scene::registry_t &registry, f32 dt = 0.f);
   /// Reloads changed model bundles/subresources without dropping the last
   /// valid pose when a new generation is malformed.
-  usize reload_changed(nxe::scene::registry_t &registry, bool force = false);
+  usize reload_changed(nxe::scene::registry_t &registry);
+  /// Resolves every loaded model's texture pages again, for pages that have
+  /// arrived since it loaded. Returns how many models changed.
+  usize refresh_textures(nxe::scene::registry_t &registry);
 
   usize update(nxe::scene::registry_t &registry,
                const nxe::scene::AssetRegistry &assets, f32 dt);

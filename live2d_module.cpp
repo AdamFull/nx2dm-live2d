@@ -94,7 +94,7 @@ public:
         LOAD_SYSTEM,
         nxe::sys::SystemFn([this, &ctx](const nxe::sys::Context &c) {
           if (m_textures.pump(ctx) != 0)
-            (void)m_system.reload_changed(ctx.scene().registry(), true);
+            (void)m_system.refresh_textures(ctx.scene().registry());
           (void)m_system.load_pending(ctx.scene().registry(), c.dt);
         }));
     ctx.schedule().add(nxe::sys::Stage::Update, LOAD_SYSTEM);

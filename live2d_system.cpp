@@ -185,7 +185,7 @@ usize Live2DSystem::take_loads(scene::registry_t &registry) {
                 return false;
               }
               runtime->asset = std::move(prepared.asset);
-              resolve_textures(runtime->asset, m_resolve);
+              (void)resolve_textures(runtime->asset, m_resolve);
               finish_load(*model, *runtime);
               published = true;
               return true;
@@ -287,8 +287,17 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
   return loaded;
 }
 
-usize Live2DSystem::reload_changed(scene::registry_t &registry,
-                                   const bool force) {
+usize Live2DSystem::refresh_textures(scene::registry_t &registry) {
+  usize changed = 0;
+  registry.view<Live2DRuntime>().each(
+      [&](const scene::Entity, Live2DRuntime &runtime) {
+        if (runtime.ready())
+          changed += resolve_textures(runtime.asset, m_resolve) != 0 ? 1u : 0u;
+      });
+  return changed;
+}
+
+usize Live2DSystem::reload_changed(scene::registry_t &registry) {
   usize loaded = 0;
   registry.view<const Live2DModel, Live2DRuntime>().each(
       [&](const scene::Entity, const Live2DModel &model,
@@ -296,7 +305,7 @@ usize Live2DSystem::reload_changed(scene::registry_t &registry,
         if (!runtime.ready() || runtime.loaded != model.model)
           return;
         const u64 changed = source_stamp(runtime.asset.dependencies());
-        if (!force && changed == runtime.source_stamp)
+        if (changed == runtime.source_stamp)
           return;
         // Observe this failed generation once. A subsequent editor save has a
         // different stamp and retries; the current runtime remains untouched.

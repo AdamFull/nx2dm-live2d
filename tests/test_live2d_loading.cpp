@@ -185,6 +185,32 @@ TEST_CASE("live2d loading: shutting down with loads in flight drains them") {
   CHECK(loader.system.loads_in_flight() == 0u);
 }
 
+TEST_CASE("live2d loading: a page that arrives after the load is taken up, not "
+          "reloaded") {
+  REQUIRE_BUNDLED();
+  u32 answer = pack_texture(NX_TEXTURE_NONE, 0);
+  Loader loader;
+  REQUIRE(loader.ok);
+  loader.system.set_resolver(
+      TextureResolver([&answer](nx::string_view) { return answer; }));
+
+  const scene::Entity e = loader.place(MODEL);
+  REQUIRE(loader.settle() == 1u);
+  const Live2DRuntime &runtime = loader.registry.get<Live2DRuntime>(e);
+  REQUIRE_FALSE(runtime.asset.textures().empty());
+  for (const u32 packed : runtime.asset.textures())
+    CHECK((packed >> 16) == NX_TEXTURE_NONE);
+  const auto *const model = runtime.asset.model();
+  CHECK(loader.system.refresh_textures(loader.registry) == 0u);
+
+  answer = pack_texture(PAGE, 0);
+  CHECK(loader.system.refresh_textures(loader.registry) == 1u);
+  CHECK(loader.system.refresh_textures(loader.registry) == 0u);
+  for (const u32 packed : runtime.asset.textures())
+    CHECK((packed >> 16) == PAGE);
+  CHECK(runtime.asset.model() == model);
+}
+
 TEST_CASE("live2d loading: ids registered from many threads stay one table") {
   REQUIRE(install_platform());
   constexpr u32 THREADS = 8;

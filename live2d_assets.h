@@ -192,7 +192,7 @@ public:
 private:
   friend bool build_model(const struct ModelSource &, ModelAsset &,
                           nx::string &, MocCache *);
-  friend void resolve_textures(ModelAsset &, const TextureResolver &);
+  friend usize resolve_textures(ModelAsset &, const TextureResolver &);
 
   void reset() noexcept;
 
@@ -253,8 +253,10 @@ struct ModelSource {
 [[nodiscard]] bool build_model(const ModelSource &source, ModelAsset &out,
                                nx::string &error, MocCache *mocs = nullptr);
 
-/// Resolves the model's texture pages, on the thread that owns textures.
-void resolve_textures(ModelAsset &asset, const TextureResolver &resolve);
+/// Resolves the model's texture pages, on the thread that owns textures. A
+/// page still loading resolves to none; resolving again once it arrives picks
+/// it up. Returns how many pages changed.
+usize resolve_textures(ModelAsset &asset, const TextureResolver &resolve);
 
 /// gather_model, build_model and resolve_textures on the calling thread, for
 /// tools and tests. A running game loads through Live2DSystem instead.
