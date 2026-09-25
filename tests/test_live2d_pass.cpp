@@ -363,7 +363,12 @@ TEST_CASE("live2d: the draw stream groups masks by atlas after the model") {
   CHECK(stream.commands[3].vertex_count == 3u);
 }
 
-TEST_CASE("live2d: one multi-draw gives each draw its own mask") {
+// Red fills the left half of the target and green the right, each clipped by
+// its own mask: red by atlas 0, green by atlas 1 on @p green_channel. The
+// masks cover opposite halves of their atlases, so a draw that read another
+// record, or a mask tile placed over its neighbour, lands in the wrong rows.
+void check_masked_halves(const std::span<const u32> atlas_sizes,
+                         const u32 green_channel, const usize expected_passes) {
   TestDevice fixture;
   if (!fixture.ready)
     SKIP("no usable RHI device");
@@ -401,10 +406,6 @@ TEST_CASE("live2d: one multi-draw gives each draw its own mask") {
     return base;
   };
 
-  // The left half is red and clipped by atlas 0's red channel, the right half
-  // green and clipped by atlas 1's green channel. The masks cover opposite
-  // halves of their atlases, so a draw reading the wrong record lands in the
-  // wrong rows.
   Frame frame;
   nx::vector<r2d::MeshVertex> &vertices = frame.geometry.vertices;
   nx::vector<u32> &indices = frame.geometry.indices;
@@ -419,8 +420,16 @@ TEST_CASE("live2d: one multi-draw gives each draw its own mask") {
                                   .index_count = 6,
                                   .vertex_offset = green,
                                   .texture = white});
-  frame.clips.push_back({.group = 0, .atlas = 0, .channel = 0});
-  frame.clips.push_back({.group = 1, .atlas = 1, .channel = 1});
+  // Each half stretches across its whole mask, as a Cubism clip does, so
+  // sampling a shared atlas without the tile placement reads both tiles.
+  glm::mat3 left(1.f);
+  left[0][0] = 2.f;
+  glm::mat3 right = left;
+  right[2][0] = -1.f;
+  frame.clips.push_back(
+      {.group = 0, .atlas = 0, .channel = 0, .from_world = left});
+  frame.clips.push_back(
+      {.group = 1, .atlas = 1, .channel = green_channel, .from_world = right});
 
   const u32 lower = quad(frame.masks.vertices, frame.masks.indices, {-1.f, 0.f},
                          {1.f, 1.f}, 0xffffffffu);
@@ -431,14 +440,14 @@ TEST_CASE("live2d: one multi-draw gives each draw its own mask") {
                                .vertex_offset = lower,
                                .texture = white,
                                .atlas = 1,
-                               .channel = 1});
+                               .channel = green_channel});
   frame.masks.draws.push_back({.first_index = 6,
                                .index_count = 6,
                                .vertex_offset = upper,
                                .texture = white,
                                .atlas = 0,
                                .channel = 0});
-  frame.atlas_sizes = {64, 128};
+  frame.atlas_sizes.assign(atlas_sizes.begin(), atlas_sizes.end());
 
   GpuCamera2D camera = {};
   glm::mat4 proj(1.f);
@@ -482,6 +491,7 @@ TEST_CASE("live2d: one multi-draw gives each draw its own mask") {
       rg::ExecuteFn([](rhi::CommandContext &, const rg::Resources &) {}));
   renderer.draw(device, graph, imported, rhi::Format::RGBA8_UNORM,
                 device.buffer_address(cameras), frame);
+  CHECK(graph.pass_count() == expected_passes);
   graph.compile();
   graph.execute(cmd);
   cmd.barrier(rhi::TextureBarrier{.texture = target,
@@ -527,4 +537,55 @@ TEST_CASE("live2d: one multi-draw gives each draw its own mask") {
   device.destroy_shader(shader);
   device.destroy_texture(target);
   device.destroy_buffer(cameras);
+}
+
+TEST_CASE("live2d: one multi-draw gives each draw its own mask") {
+  // Different sizes never share an atlas: clear, two masks, the model.
+  static constexpr u32 SIZES[] = {64, 128};
+  check_masked_halves(SIZES, 1, 4);
+}
+
+TEST_CASE("live2d: masks sharing an atlas stay in their own tiles") {
+  // One shared atlas and one channel, so only the tiles keep them apart.
+  static constexpr u32 SIZES[] = {64, 64};
+  check_masked_halves(SIZES, 0, 3);
+}
+
+TEST_CASE("live2d: mask atlases pack as tiles of shared atlases") {
+  nx::small_vector<MaskTile, MAX_MASK_ATLASES> tiles;
+  nx::small_vector<glm::uvec2, MAX_MASK_ATLASES> atlases;
+
+  static constexpr u32 TWELVE[] = {512, 512, 512, 512, 512, 512,
+                                   512, 512, 512, 512, 512, 512};
+  pack_mask_atlases(TWELVE, 2048, tiles, atlases);
+  REQUIRE(atlases.size() == 1u);
+  CHECK(atlases[0] == glm::uvec2(2048, 1536));
+  REQUIRE(tiles.size() == 12u);
+  CHECK(tiles[0].scale == glm::vec2(0.25f, 1.f / 3.f));
+  CHECK(tiles[0].offset == glm::vec2(0.f));
+  CHECK(tiles[5].offset == glm::vec2(0.25f, 1.f / 3.f));
+  CHECK(tiles[11].offset == glm::vec2(0.75f, 2.f / 3.f));
+
+  // Five of them balance into three columns rather than four and a straggler.
+  static constexpr u32 FIVE[] = {512, 512, 512, 512, 512};
+  pack_mask_atlases(FIVE, 2048, tiles, atlases);
+  REQUIRE(atlases.size() == 1u);
+  CHECK(atlases[0] == glm::uvec2(1536, 1024));
+
+  static constexpr u32 MIXED[] = {512, 256, 512};
+  pack_mask_atlases(MIXED, 2048, tiles, atlases);
+  REQUIRE(atlases.size() == 2u);
+  CHECK(atlases[0] == glm::uvec2(1024, 512));
+  CHECK(atlases[1] == glm::uvec2(256, 256));
+  CHECK(tiles[0].atlas == 0u);
+  CHECK(tiles[1].atlas == 1u);
+  CHECK(tiles[2].atlas == 0u);
+  CHECK(tiles[2].offset == glm::vec2(0.5f, 0.f));
+
+  // A tile as big as the limit keeps an atlas to itself.
+  static constexpr u32 FULL[] = {2048, 2048};
+  pack_mask_atlases(FULL, 2048, tiles, atlases);
+  REQUIRE(atlases.size() == 2u);
+  CHECK(tiles[1].atlas == 1u);
+  CHECK(tiles[1].scale == glm::vec2(1.f));
 }

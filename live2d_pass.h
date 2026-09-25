@@ -5,6 +5,10 @@
 #include "rendering/rhi/descs.h"
 #include "rendering/rhi/upload_ring.h"
 
+#include <glm/vec2.hpp>
+
+#include <span>
+
 namespace nxm::live2d {
 
 [[nodiscard]] nxe::rhi::BlendMode
@@ -28,6 +32,7 @@ struct Frame {
 
 inline constexpr u32 MAX_MASK_ATLASES = 16;
 inline constexpr u32 NO_MASK = 0xFFFFFFFFu;
+inline constexpr u32 DEFAULT_ATLAS_LIMIT = 2048;
 
 // Mirrors Live2DDraw in live2d.slang. A model draw reads row0/row1 as its
 // world-to-atlas affine; a mask draw as its model-to-clip affine and clamps
@@ -51,17 +56,34 @@ static_assert(sizeof(DrawRecord) == 96);
 // One record and one indirect command per draw, the command naming its record
 // by first_instance: the model's draws in order, then the mask draws grouped
 // by atlas.
+// A mask placed as a tile of a shared atlas: its own atlas's unit square maps
+// to [offset, offset + scale] of the shared one.
+struct MaskTile {
+  u32 atlas = 0;
+  glm::vec2 scale{1.f};
+  glm::vec2 offset{0.f};
+};
+
+// Packs the frame's per-model mask atlases as tiles of as few shared atlases as
+// fit, each no wider or taller than @p limit. Tiles of one size share atlases;
+// @p tiles is indexed like frame.atlas_sizes.
+void pack_mask_atlases(std::span<const u32> sizes, u32 limit,
+                       nx::small_vector<MaskTile, MAX_MASK_ATLASES> &tiles,
+                       nx::small_vector<glm::uvec2, MAX_MASK_ATLASES> &atlases);
+
 struct DrawStream {
   nx::vector<DrawRecord> records;
   nx::vector<nxe::rhi::DrawIndirectCommand> commands;
   nx::small_vector<u32, MAX_MASK_ATLASES + 1> atlas_first;
+  nx::small_vector<MaskTile, MAX_MASK_ATLASES> tiles;
+  nx::small_vector<glm::uvec2, MAX_MASK_ATLASES> atlases;
 
   [[nodiscard]] u32 model_count() const noexcept {
     return atlas_first.empty() ? nx::cast<u32>(records.size())
                                : atlas_first.front();
   }
 
-  void build(const Frame &frame);
+  void build(const Frame &frame, u32 atlas_limit = DEFAULT_ATLAS_LIMIT);
 };
 
 struct PushBlock {
@@ -93,6 +115,8 @@ public:
 
   [[nodiscard]] bool ready() const noexcept { return m_mask_pipeline.valid(); }
 
+  void set_atlas_limit(u32 limit) noexcept;
+
   void draw(nxe::rhi::Device &device, nxe::rg::RenderGraph &graph,
             nxe::rg::TextureId target, nxe::rhi::Format format, u64 cameras,
             const Frame &frame);
@@ -117,6 +141,7 @@ private:
       m_model_pipeline[nx::cast<usize>(nxe::r2d::MeshBlend::Count)];
   nxe::rhi::Format m_format = nxe::rhi::Format::Unknown;
   u32 m_sampler = 0;
+  u32 m_atlas_limit = DEFAULT_ATLAS_LIMIT;
 };
 
 } // namespace nxm::live2d

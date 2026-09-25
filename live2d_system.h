@@ -24,7 +24,16 @@ struct SceneView {
   f32 depth_min = -1024.f;
   f32 depth_max = 1024.f;
   const nxe::r2d::MaterialSystem *materials = nullptr;
+  // Screen pixels per world unit along each axis; zero when unknown, which
+  // renders masks at the resolution each model asks for.
+  glm::vec2 pixels_per_unit{0.f};
 };
+
+// The mask atlas edge a model needs to match its size on screen: the next power
+// of two of its larger on-screen extent, within [64, the layout's own].
+[[nodiscard]] u32 mask_texels(const MaskLayout &masks, const CanvasInfo &canvas,
+                              const glm::mat3 &world,
+                              glm::vec2 pixels_per_unit) noexcept;
 
 class Live2DSystem {
 public:
@@ -85,6 +94,7 @@ private:
     Live2DRuntime *runtime = nullptr;
     ModelView view;
     bool wants_masks = false;
+    u32 mask_size = 0;
     Frame local;
     usize geometry = 0;
     usize masks = 0;

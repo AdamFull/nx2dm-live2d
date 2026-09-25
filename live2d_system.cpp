@@ -1,10 +1,13 @@
 #include "live2d/live2d_system.h"
 
 #include "core/foundation/diagnostics/log.h"
+#include "core/foundation/diagnostics/profiler.h"
 #include "core/foundation/vfs/vfs.h"
 #include "rendering/render2d/material_system.h"
 #include "scene/animation/animation_graph.h"
 #include "scene/asset/assets.h"
+
+#include <glm/geometric.hpp>
 
 #include <cmath>
 #include <limits>
@@ -213,6 +216,7 @@ usize Live2DSystem::drive_lip_sync(scene::registry_t &registry,
 void Live2DSystem::step(const UpdateWork &work,
                         const scene::AssetRegistry &assets,
                         const f32 dt) const {
+  NX_PROFILE_ZONE("live2d::step");
   const Live2DModel &model = *work.model;
   Live2DRuntime &runtime = *work.runtime;
   f32 animation_speed = 1.f;
@@ -251,7 +255,10 @@ void Live2DSystem::step(const UpdateWork &work,
   runtime.animator.set_breathing(model.breathe);
   runtime.animator.set_mouth(model.mouth);
   runtime.animator.update(dt * model.time_scale * animation_speed);
-  runtime.masks.update(runtime.asset);
+  {
+    NX_PROFILE_ZONE("live2d::masks");
+    runtime.masks.update(runtime.asset);
+  }
 }
 
 usize Live2DSystem::update(scene::registry_t &registry,
@@ -281,6 +288,23 @@ usize Live2DSystem::update(scene::registry_t &registry,
 usize Live2DSystem::update(scene::registry_t &registry, const f32 dt) {
   static const scene::AssetRegistry no_graph_assets;
   return update(registry, no_graph_assets, dt);
+}
+
+u32 mask_texels(const MaskLayout &masks, const CanvasInfo &canvas,
+                const glm::mat3 &world,
+                const glm::vec2 pixels_per_unit) noexcept {
+  const u32 layout = masks.atlas_size();
+  if (pixels_per_unit.x <= 0.f || pixels_per_unit.y <= 0.f)
+    return layout;
+  const f32 across = canvas.width_units() * glm::length(glm::vec2(world[0])) *
+                     pixels_per_unit.x;
+  const f32 down = canvas.height_units() * glm::length(glm::vec2(world[1])) *
+                   pixels_per_unit.y;
+  const f32 extent = std::ceil(nx::max(across, down));
+  if (!(extent < nx::cast<f32>(layout)))
+    return layout;
+  const u32 wanted = nx::next_pow2(nx::max(nx::cast<u32>(extent), 1u));
+  return nx::clamp(wanted, nx::min(MIN_MASK_RESOLUTION, layout), layout);
 }
 
 usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
@@ -315,12 +339,18 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
           work.view.batch = view.materials->batch_of(model.material);
           work.view.material = view.materials->offset_of(model.material);
         }
+        work.mask_size =
+            work.wants_masks
+                ? mask_texels(runtime.masks, runtime.asset.canvas(),
+                              work.view.world, view.pixels_per_unit)
+                : 0u;
       });
 
   // Each model builds its draws alone, masks included, as if its masks were
   // first in the frame's atlases. Which of them keep their masks is decided
   // below, in order, against the frame's budget.
   const auto build = [&](const usize i) {
+    NX_PROFILE_ZONE("live2d::build");
     EmitWork &work = m_emit[i];
     work.local.clear();
     const Live2DRuntime &runtime = *work.runtime;
@@ -341,7 +371,7 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
   for (usize i = 0; i < m_emit_count; ++i) {
     EmitWork &work = m_emit[i];
     const Live2DRuntime &runtime = *work.runtime;
-    const u32 size = runtime.masks.atlas_size();
+    const u32 size = work.mask_size;
     const u32 count = runtime.masks.atlas_count();
     const u64 per_atlas = nx::cast<u64>(size) * size * MASK_TEXEL_BYTES;
     const u64 required = per_atlas * count;

@@ -57,6 +57,33 @@ struct World {
 
 }
 
+TEST_CASE("live2d: a model's masks are sized to its size on screen") {
+  const MaskLayout layout;
+  REQUIRE(layout.atlas_size() == 512u);
+  // One unit across, 1.82 down.
+  const CanvasInfo canvas{
+      .width = 100.f, .height = 182.f, .pixels_per_unit = 100.f};
+  glm::mat3 world(1.f);
+
+  // With no camera to measure against it keeps the layout's own size.
+  CHECK(mask_texels(layout, canvas, world, glm::vec2(0.f)) == 512u);
+  // 182 px tall rounds up to 256.
+  CHECK(mask_texels(layout, canvas, world, glm::vec2(100.f)) == 256u);
+  // Taller than the layout asks for: never above it.
+  CHECK(mask_texels(layout, canvas, world, glm::vec2(400.f)) == 512u);
+
+  // Scaled to a tenth, 19 px tall, and held at the 64 px floor.
+  world[0] *= 0.1f;
+  world[1] *= 0.1f;
+  CHECK(mask_texels(layout, canvas, world, glm::vec2(100.f)) == 64u);
+
+  // A wide stretch counts along the axis it stretches.
+  world = glm::mat3(1.f);
+  world[0] *= 5.f;
+  CHECK(mask_texels(layout, canvas, world, glm::vec2(60.f, 10.f)) == 512u);
+  CHECK(mask_texels(layout, canvas, world, glm::vec2(20.f, 10.f)) == 128u);
+}
+
 TEST_CASE("live2d: mask limits retain a safe minimum under memory pressure") {
   scene::registry_t registry;
   Live2DSystem::register_components(registry);

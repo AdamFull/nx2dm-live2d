@@ -6,9 +6,12 @@
 #include "app/assets/async_texture_set.h"
 #include "app/engine.h"
 #include "app/module_system/module.h"
+#include "rendering/render2d/frame_packet.h"
 #include "scene/scene_json.h"
 
 #include "core/foundation/diagnostics/log.h"
+
+#include <glm/common.hpp>
 
 namespace nxm::live2d {
 namespace {
@@ -46,6 +49,7 @@ public:
                                               u64{4} << 20, u64{32} << 20)
                                   : u64{16} << 20;
     m_system.set_mask_limits(max_mask_resolution, memory_budget);
+    m_renderer.set_atlas_limit(max_mask_resolution);
     m_system.set_threads(&ctx.threads());
     m_system.set_resolver(TextureResolver([this,
                                            &ctx](const nx::string_view path) {
@@ -110,10 +114,17 @@ public:
             return;
           Frame &frame = packet->channel<Frame>();
           frame.clear();
-          const SceneView view{.camera = packet->active_camera,
-                               .depth_min = ctx.renderer().depth_min(),
-                               .depth_max = ctx.renderer().depth_max(),
-                               .materials = ctx.renderer().materials()};
+          SceneView view{.camera = packet->active_camera,
+                         .depth_min = ctx.renderer().depth_min(),
+                         .depth_max = ctx.renderer().depth_max(),
+                         .materials = ctx.renderer().materials()};
+          if (packet->active_camera < packet->cameras.size()) {
+            const GpuCamera2D &camera = packet->cameras[packet->active_camera];
+            view.pixels_per_unit =
+                0.5f *
+                glm::abs(glm::vec2(camera.view_proj[0][0] * camera.viewport.x,
+                                   camera.view_proj[1][1] * camera.viewport.y));
+          }
           (void)m_system.emit(ctx.scene().registry(), frame, view);
         }));
     ctx.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
