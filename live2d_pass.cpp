@@ -33,9 +33,9 @@ rhi::BlendMode pipeline_blend(const r2d::MeshBlend blend) noexcept {
 
 namespace {
 
-void put_affine(PushBlock &push, const glm::mat3 &m) noexcept {
-  push.mask_row0 = glm::vec4(m[0][0], m[1][0], m[2][0], 0.f);
-  push.mask_row1 = glm::vec4(m[0][1], m[1][1], m[2][1], 0.f);
+void put_affine(DrawRecord &record, const glm::mat3 &m) noexcept {
+  record.row0 = glm::vec4(m[0][0], m[1][0], m[2][0], 0.f);
+  record.row1 = glm::vec4(m[0][1], m[1][1], m[2][1], 0.f);
 }
 
 [[nodiscard]] glm::vec4 channel_vector(const u32 channel) noexcept {
@@ -44,12 +44,82 @@ void put_affine(PushBlock &push, const glm::mat3 &m) noexcept {
   return v;
 }
 
+[[nodiscard]] rhi::DrawIndirectCommand command(const u32 index_count,
+                                               const usize record) noexcept {
+  return {.vertex_count = index_count,
+          .instance_count = 1,
+          .first_vertex = 0,
+          .first_instance = nx::cast<u32>(record)};
+}
+
 } // namespace
+
+void DrawStream::build(const Frame &frame) {
+  records.clear();
+  commands.clear();
+  atlas_first.clear();
+
+  const bool masking = !frame.masks.empty() && !frame.atlas_sizes.empty();
+  const u32 atlases = masking ? nx::min(nx::cast<u32>(frame.atlas_sizes.size()),
+                                        MAX_MASK_ATLASES)
+                              : 0u;
+
+  const usize models = frame.geometry.draws.size();
+  records.reserve(models + (masking ? frame.masks.draws.size() : 0u));
+  commands.reserve(records.capacity());
+  for (usize i = 0; i < models; ++i) {
+    const r2d::MeshDraw &draw = frame.geometry.draws[i];
+    const DrawMask &clip = i < frame.clips.size() ? frame.clips[i] : DrawMask{};
+    DrawRecord &record = records.emplace_back();
+    put_affine(record, clip.from_world);
+    record.channel = channel_vector(clip.channel);
+    record.index_offset = draw.first_index;
+    record.vertex_offset = draw.vertex_offset;
+    record.texture = nx_texture_2d<float4>(draw.texture);
+    record.camera = draw.camera;
+    const bool clipped = clip.clipped() && clip.atlas < atlases;
+    record.mask = clipped ? clip.atlas : NO_MASK;
+    record.inverted = clipped && clip.inverted ? 1u : 0u;
+    commands.push_back(command(draw.index_count, i));
+  }
+  if (atlases == 0u)
+    return;
+
+  // Masks only add, so grouping them by atlas cannot change what they draw.
+  atlas_first.resize(atlases + 1u, 0u);
+  for (const MaskDraw &draw : frame.masks.draws)
+    if (draw.atlas < atlases)
+      ++atlas_first[draw.atlas + 1u];
+  atlas_first[0] = nx::cast<u32>(models);
+  for (u32 a = 1; a <= atlases; ++a)
+    atlas_first[a] += atlas_first[a - 1u];
+
+  const usize total = atlas_first[atlases];
+  records.resize(total);
+  commands.resize(total);
+  nx::small_vector<u32, MAX_MASK_ATLASES> next;
+  for (u32 a = 0; a < atlases; ++a)
+    next.push_back(atlas_first[a]);
+  for (const MaskDraw &draw : frame.masks.draws) {
+    if (draw.atlas >= atlases)
+      continue;
+    const u32 slot = next[draw.atlas]++;
+    DrawRecord &record = records[slot];
+    record = {};
+    put_affine(record, draw.to_mask);
+    record.channel = channel_vector(draw.channel);
+    record.tile = draw.tile;
+    record.index_offset = draw.first_index;
+    record.vertex_offset = draw.vertex_offset;
+    record.texture = nx_texture_2d<float4>(draw.texture);
+    commands[slot] = command(draw.index_count, slot);
+  }
+}
 
 bool ModelRenderer::init(rhi::Device &device, const u32 sampler) {
   static constexpr nx::string_view ARRAYS[] = {
-      "live2d vertices", "live2d indices", "live2d mask vertices",
-      "live2d mask indices"};
+      "live2d vertices",     "live2d indices", "live2d mask vertices",
+      "live2d mask indices", "live2d draws",   "live2d draw commands"};
   static_assert(nx::array_size(ARRAYS) == ARRAY_COUNT);
   if (!m_ring.init(&device, ARRAYS)) {
     return false;
@@ -96,11 +166,20 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
   if (vertices == 0 || indices == 0)
     return;
 
-  const bool masking = !frame.masks.empty() && !frame.atlas_sizes.empty();
+  m_stream.build(frame);
+  const u64 draws =
+      m_ring.write(DRAWS, m_stream.records.data(),
+                   nx::cast<u64>(m_stream.records.size()) * sizeof(DrawRecord));
+  if (draws == 0 || m_ring.write(COMMANDS, m_stream.commands.data(),
+                                 nx::cast<u64>(m_stream.commands.size()) *
+                                     sizeof(rhi::DrawIndirectCommand)) == 0)
+    return;
+  const rhi::BufferHandle commands = m_ring.buffer(COMMANDS);
+
   u64 mask_vertices = 0;
   u64 mask_indices = 0;
-  nx::small_vector<rg::TextureId, 16> atlases;
-  if (masking) {
+  nx::small_vector<rg::TextureId, MAX_MASK_ATLASES> atlases;
+  if (!m_stream.atlas_first.empty()) {
     mask_vertices = m_ring.write(MASK_VERTICES, frame.masks.vertices.data(),
                                  nx::cast<u64>(frame.masks.vertices.size()) *
                                      sizeof(r2d::MeshVertex));
@@ -110,50 +189,49 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
     if (mask_vertices == 0 || mask_indices == 0)
       return;
 
-    atlases.reserve(frame.atlas_sizes.size());
-    for (const u32 size : frame.atlas_sizes)
+    for (usize a = 0; a + 1u < m_stream.atlas_first.size(); ++a)
       atlases.push_back(graph.create({
           .name = "live2d masks",
           .format = rhi::Format::RGBA8_UNORM,
-          .width = size,
-          .height = size,
+          .width = frame.atlas_sizes[a],
+          .height = frame.atlas_sizes[a],
           .usage = rhi::TextureUsage::RenderTarget | rhi::TextureUsage::Sampled,
       }));
   }
 
-  if (masking) {
-    for (usize atlas_index = 0; atlas_index < atlases.size(); ++atlas_index) {
-      const rg::TextureId atlas = atlases[atlas_index];
-      const u32 size = frame.atlas_sizes[atlas_index];
-      graph.add_pass(nx::format("live2d.masks.{}", atlas_index).view(),
-                     rg::SetupFn([atlas](rg::Builder &builder) {
-                       builder.color(0, atlas,
-                                     rhi::clear_color(0.f, 0.f, 0.f, 0.f));
-                     }),
-                     rg::ExecuteFn([this, &frame, mask_vertices, mask_indices,
-                                    size, atlas_index](rhi::CommandContext &cmd,
-                                                       const rg::Resources &) {
-                       cmd.set_viewport({.width = nx::cast<f32>(size),
-                                         .height = nx::cast<f32>(size)});
-                       cmd.set_scissor({{0, 0}, {size, size}});
-                       cmd.bind_pipeline(m_mask_pipeline);
-                       for (const MaskDraw &draw : frame.masks.draws) {
-                         if (nx::cast<usize>(draw.atlas) != atlas_index)
-                           continue;
-                         PushBlock push;
-                         put_affine(push, draw.to_mask);
-                         push.channel = channel_vector(draw.channel);
-                         push.tile = draw.tile;
-                         push.vertices = mask_vertices;
-                         push.indices = mask_indices;
-                         push.index_offset = draw.first_index;
-                         push.vertex_offset = draw.vertex_offset;
-                         push.texture = nx_texture_2d<float4>(draw.texture);
-                         cmd.push_constants(&push, sizeof(push));
-                         cmd.draw(draw.index_count);
-                       }
-                     }));
-    }
+  for (usize atlas_index = 0; atlas_index < atlases.size(); ++atlas_index) {
+    const rg::TextureId atlas = atlases[atlas_index];
+    const u32 size = frame.atlas_sizes[atlas_index];
+    const u32 first = m_stream.atlas_first[atlas_index];
+    const u32 count = m_stream.atlas_first[atlas_index + 1u] - first;
+    graph.add_pass(
+        nx::format("live2d.masks.{}", atlas_index).view(),
+        rg::SetupFn([atlas](rg::Builder &builder) {
+          builder.color(0, atlas, rhi::clear_color(0.f, 0.f, 0.f, 0.f));
+        }),
+        rg::ExecuteFn([this, commands, mask_vertices, mask_indices, draws, size,
+                       first,
+                       count](rhi::CommandContext &cmd, const rg::Resources &) {
+          cmd.set_viewport(
+              {.width = nx::cast<f32>(size), .height = nx::cast<f32>(size)});
+          cmd.set_scissor({{0, 0}, {size, size}});
+          if (count == 0u)
+            return;
+          cmd.bind_pipeline(m_mask_pipeline);
+          PushBlock push;
+          push.vertices = mask_vertices;
+          push.indices = mask_indices;
+          push.draws = draws;
+          cmd.push_constants(&push, sizeof(push));
+          for (u32 done = 0; done < count;) {
+            const u32 run = nx::min(count - done, MAX_MULTI_DRAW);
+            cmd.draw_indirect(commands,
+                              nx::cast<u64>(first + done) *
+                                  sizeof(rhi::DrawIndirectCommand),
+                              run, sizeof(rhi::DrawIndirectCommand));
+            done += run;
+          }
+        }));
   }
 
   graph.add_pass(
@@ -162,43 +240,33 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
         for (const rg::TextureId atlas : atlases)
           builder.sample(atlas);
       }),
-      rg::ExecuteFn([this, &device, &frame, atlases, cameras, vertices,
-                     indices](rhi::CommandContext &cmd,
-                              const rg::Resources &resources) {
-        nx::small_vector<u32, 16> mask_textures;
-        mask_textures.reserve(atlases.size());
-        for (const rg::TextureId atlas : atlases)
-          mask_textures.push_back(pack_texture(
-              device.texture_index(resources.texture(atlas)), m_sampler));
+      rg::ExecuteFn([this, &device, &frame, atlases, commands, cameras,
+                     vertices, indices, draws](rhi::CommandContext &cmd,
+                                               const rg::Resources &resources) {
+        PushBlock push;
+        push.cameras = cameras;
+        push.vertices = vertices;
+        push.indices = indices;
+        push.draws = draws;
+        for (usize a = 0; a < atlases.size(); ++a)
+          push.masks[a] = nx_texture_2d<float4>(pack_texture(
+              device.texture_index(resources.texture(atlases[a])), m_sampler));
 
-        r2d::MeshBlend bound = r2d::MeshBlend::Count;
-        for (usize i = 0; i < frame.geometry.draws.size(); ++i) {
-          const r2d::MeshDraw &draw = frame.geometry.draws[i];
-          if (draw.blend != bound) {
-            bound = draw.blend;
-            cmd.bind_pipeline(m_model_pipeline[nx::cast<usize>(bound)]);
-          }
-
-          const DrawMask &clip =
-              i < frame.clips.size() ? frame.clips[i] : DrawMask{};
-          PushBlock push;
-          put_affine(push, clip.from_world);
-          push.channel = channel_vector(clip.channel);
-          push.cameras = cameras;
-          push.vertices = vertices;
-          push.indices = indices;
-          push.index_offset = draw.first_index;
-          push.vertex_offset = draw.vertex_offset;
-          push.texture = nx_texture_2d<float4>(draw.texture);
-          push.camera = draw.camera;
-          const bool clipped = clip.clipped() && nx::cast<usize>(clip.atlas) <
-                                                     mask_textures.size();
-          push.mask_texture =
-              nx_texture_2d<float4>(clipped ? mask_textures[clip.atlas]
-                                            : pack_texture(NX_TEXTURE_NONE, 0));
-          push.inverted = clipped && clip.inverted ? 1u : 0u;
+        // Each run of draws at one blend is one multi-draw, in draw order.
+        const nx::vector<r2d::MeshDraw> &model = frame.geometry.draws;
+        const u32 total = nx::cast<u32>(model.size());
+        for (u32 i = 0; i < total;) {
+          const r2d::MeshBlend blend = model[i].blend;
+          u32 run = 1;
+          while (i + run < total && run < MAX_MULTI_DRAW &&
+                 model[i + run].blend == blend)
+            ++run;
+          cmd.bind_pipeline(m_model_pipeline[nx::cast<usize>(blend)]);
           cmd.push_constants(&push, sizeof(push));
-          cmd.draw(draw.index_count);
+          cmd.draw_indirect(commands,
+                            nx::cast<u64>(i) * sizeof(rhi::DrawIndirectCommand),
+                            run, sizeof(rhi::DrawIndirectCommand));
+          i += run;
         }
       }));
 }

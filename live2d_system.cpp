@@ -17,7 +17,6 @@ namespace scene = nxe::scene;
 constexpr f32 LOAD_RETRY_BASE_SECONDS = 1.f;
 constexpr f32 LOAD_RETRY_MAX_SECONDS = 30.f;
 constexpr u32 MIN_MASK_RESOLUTION = 64;
-constexpr u32 MAX_MASK_ATLASES = 16;
 constexpr u64 MASK_TEXEL_BYTES = 4;
 
 [[nodiscard]] u64

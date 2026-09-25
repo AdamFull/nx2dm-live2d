@@ -1,8 +1,9 @@
 #pragma once
 
-#include "rendering/graph/render_graph.h"
-#include "rendering/rhi/upload_ring.h"
 #include "live2d/live2d_draw.h"
+#include "rendering/graph/render_graph.h"
+#include "rendering/rhi/descs.h"
+#include "rendering/rhi/upload_ring.h"
 
 namespace nxm::live2d {
 
@@ -25,20 +26,50 @@ struct Frame {
   }
 };
 
-struct PushBlock {
-  glm::vec4 mask_row0{0.f};
-  glm::vec4 mask_row1{0.f};
+inline constexpr u32 MAX_MASK_ATLASES = 16;
+inline constexpr u32 NO_MASK = 0xFFFFFFFFu;
+
+// Mirrors Live2DDraw in live2d.slang. A model draw reads row0/row1 as its
+// world-to-atlas affine; a mask draw as its model-to-clip affine and clamps
+// to tile.
+struct DrawRecord {
+  glm::vec4 row0{0.f};
+  glm::vec4 row1{0.f};
   glm::vec4 channel{0.f};
   glm::vec4 tile{-1.f, -1.f, 1.f, 1.f};
-  u64 cameras = 0;
-  u64 vertices = 0;
-  u64 indices = 0;
   u32 index_offset = 0;
   u32 vertex_offset = 0;
   NxTexture2D<float4> texture{};
   u32 camera = 0;
-  NxTexture2D<float4> mask_texture{};
+  u32 mask = NO_MASK;
   u32 inverted = 0;
+  u32 _pad0 = 0;
+  u32 _pad1 = 0;
+};
+static_assert(sizeof(DrawRecord) == 96);
+
+// One record and one indirect command per draw, the command naming its record
+// by first_instance: the model's draws in order, then the mask draws grouped
+// by atlas.
+struct DrawStream {
+  nx::vector<DrawRecord> records;
+  nx::vector<nxe::rhi::DrawIndirectCommand> commands;
+  nx::small_vector<u32, MAX_MASK_ATLASES + 1> atlas_first;
+
+  [[nodiscard]] u32 model_count() const noexcept {
+    return atlas_first.empty() ? nx::cast<u32>(records.size())
+                               : atlas_first.front();
+  }
+
+  void build(const Frame &frame);
+};
+
+struct PushBlock {
+  u64 cameras = 0;
+  u64 vertices = 0;
+  u64 indices = 0;
+  u64 draws = 0;
+  NxTexture2D<float4> masks[MAX_MASK_ATLASES]{};
 };
 static_assert(sizeof(PushBlock) <= nxe::rhi::PUSH_CONSTANT_SIZE,
               "the Live2D push block must fit the guaranteed push range");
@@ -72,10 +103,15 @@ private:
     MODEL_INDICES,
     MASK_VERTICES,
     MASK_INDICES,
+    DRAWS,
+    COMMANDS,
     ARRAY_COUNT
   };
 
+  static constexpr u32 MAX_MULTI_DRAW = 65535;
+
   nxe::rhi::UploadRing m_ring;
+  DrawStream m_stream;
   nxe::rhi::PipelineHandle m_mask_pipeline;
   nxe::rhi::PipelineHandle
       m_model_pipeline[nx::cast<usize>(nxe::r2d::MeshBlend::Count)];
