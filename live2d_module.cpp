@@ -128,6 +128,9 @@ public:
           (void)m_system.emit(ctx.scene().registry(), frame, view);
         }));
     ctx.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
+    ctx.schedule()
+        .declare<const Live2DModel, Live2DRuntime,
+                 const nxe::scene::WorldTransform2D>(EMIT_SYSTEM);
 
     ctx.passes().define(
         DRAW_PASS, nxe::PassFn([this, &ctx](nxe::rg::RenderGraph &graph,

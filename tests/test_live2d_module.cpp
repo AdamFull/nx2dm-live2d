@@ -99,6 +99,48 @@ TEST_CASE("live2d: attaching wires the systems, the pass and the slot") {
     CHECK(model < ui);
 }
 
+TEST_CASE("live2d: its emit runs beside the other declared Present systems") {
+  Harness h;
+  if (!h.ready)
+    SKIP("no usable RHI device");
+
+  // A stand-in for another module's draw system: it declared what it
+  // touches, and that is none of Live2D's components.
+  sys::Schedule &schedule = h.engine->schedule();
+  REQUIRE(schedule.try_define("test.present",
+                              sys::SystemFn([](const sys::Context &) {})));
+  schedule.add(sys::Stage::Present, "test.present");
+  schedule.declare<const scene::WorldTransform2D>("test.present");
+
+  const auto systems = schedule.systems_in(sys::Stage::Present);
+  const nx::vector<nx::vector<u32>> needs =
+      schedule.dependencies(sys::Stage::Present);
+  REQUIRE(needs.size() == systems.size());
+
+  u32 emit = ~0u;
+  for (u32 i = 0; i < systems.size(); ++i)
+    if (systems.data()[i] == "live2d.emit")
+      emit = i;
+  REQUIRE(emit != ~0u);
+  CHECK(schedule.access_of("live2d.emit").size() > 0u);
+
+  const auto waits = [&](const u32 system, const u32 on) {
+    for (const u32 before : needs[system])
+      if (before == on)
+        return true;
+    return false;
+  };
+  usize beside = 0;
+  for (u32 i = 0; i < systems.size(); ++i) {
+    if (i == emit || schedule.access_of(systems.data()[i]).size() == 0u)
+      continue;
+    CHECK_FALSE(waits(i, emit));
+    CHECK_FALSE(waits(emit, i));
+    ++beside;
+  }
+  CHECK(beside > 0u);
+}
+
 TEST_CASE("live2d: the component reaches the scene format table") {
   Harness h;
   if (!h.ready)
