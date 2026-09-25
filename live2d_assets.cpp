@@ -176,16 +176,20 @@ nx::shared_ptr<SharedMoc> MocCache::find(const nx::string_view key,
   return {};
 }
 
-void MocCache::add(const nx::string_view key, const u64 generation,
-                   nx::shared_ptr<SharedMoc> moc) {
+nx::shared_ptr<SharedMoc> MocCache::add(const nx::string_view key,
+                                        const u64 generation,
+                                        nx::shared_ptr<SharedMoc> moc) {
   const nx::scoped_lock<nx::mutex> held(m_lock);
   for (Entry &entry : m_entries)
     if (entry.key == key) {
-      entry.generation = generation;
-      entry.moc = std::move(moc);
-      return;
+      if (entry.generation != generation) {
+        entry.generation = generation;
+        entry.moc = std::move(moc);
+      }
+      return entry.moc;
     }
-  m_entries.push_back({nx::string(key), generation, std::move(moc)});
+  m_entries.push_back({nx::string(key), generation, moc});
+  return moc;
 }
 
 usize MocCache::prune() {
@@ -518,7 +522,7 @@ bool build_model(const ModelSource &source, ModelAsset &out, nx::string &error,
       return false;
     }
     if (mocs != nullptr)
-      mocs->add(moc_key.view(), moc_generation, shared);
+      shared = mocs->add(moc_key.view(), moc_generation, std::move(shared));
   }
 
   auto *const owner = CSM_NEW HostedModel();

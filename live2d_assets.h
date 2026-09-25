@@ -108,7 +108,10 @@ class MocCache {
 public:
   [[nodiscard]] nx::shared_ptr<SharedMoc> find(nx::string_view key,
                                                u64 generation) const;
-  void add(nx::string_view key, u64 generation, nx::shared_ptr<SharedMoc> moc);
+  /// Returns the moc to use: one that another load of the same generation
+  /// added first, or @p moc.
+  [[nodiscard]] nx::shared_ptr<SharedMoc>
+  add(nx::string_view key, u64 generation, nx::shared_ptr<SharedMoc> moc);
 
   /// Drops the mocs no model holds any longer. Returns how many.
   usize prune();

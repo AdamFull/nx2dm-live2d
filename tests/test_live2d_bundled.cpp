@@ -151,6 +151,27 @@ TEST_CASE("live2d: a shared moc outlives each model and goes with the last") {
   CHECK(mocs.size() == 1u);
 }
 
+TEST_CASE("live2d: the first moc added for a generation is the one kept") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  nx::string error;
+  ModelAsset first;
+  ModelAsset second;
+  REQUIRE(load_model(MODEL, {}, first, error));
+  REQUIRE(load_model(MODEL, {}, second, error));
+  REQUIRE(first.moc().get() != second.moc().get());
+
+  // Two loads that both missed the cache: the later one takes the earlier moc.
+  MocCache mocs;
+  CHECK(mocs.add("/m.moc3", 1u, first.moc()).get() == first.moc().get());
+  CHECK(mocs.add("/m.moc3", 1u, second.moc()).get() == first.moc().get());
+  CHECK(mocs.find("/m.moc3", 1u).get() == first.moc().get());
+  CHECK(mocs.add("/m.moc3", 2u, second.moc()).get() == second.moc().get());
+  CHECK(mocs.size() == 1u);
+}
+
 TEST_CASE("live2d: a moc of another generation is never reused") {
   REQUIRE_BUNDLED();
   Mounted mount;
@@ -162,12 +183,12 @@ TEST_CASE("live2d: a moc of another generation is never reused") {
   REQUIRE(load_model(MODEL, {}, asset, error));
   const nx::shared_ptr<SharedMoc> moc = asset.moc();
 
-  mocs.add("/m.moc3", 1u, moc);
+  CHECK(mocs.add("/m.moc3", 1u, moc).get() == moc.get());
   CHECK(mocs.find("/m.moc3", 1u).get() == moc.get());
   CHECK_FALSE(mocs.find("/m.moc3", 2u));
   CHECK_FALSE(mocs.find("/other.moc3", 1u));
   // A new generation of the same file takes its place.
-  mocs.add("/m.moc3", 2u, moc);
+  (void)mocs.add("/m.moc3", 2u, moc);
   CHECK(mocs.size() == 1u);
   CHECK_FALSE(mocs.find("/m.moc3", 1u));
 }

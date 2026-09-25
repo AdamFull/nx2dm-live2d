@@ -131,6 +131,28 @@ TEST_CASE("live2d loading: a bound system loads off the frame, then takes it") {
   CHECK(runtime->asset.mesh()->vertex_count() == direct.mesh()->vertex_count());
 }
 
+TEST_CASE("live2d loading: models of one file loading at once share one moc") {
+  REQUIRE_BUNDLED();
+  Loader loader;
+  REQUIRE(loader.ok);
+
+  constexpr u32 COUNT = 12;
+  nx::vector<scene::Entity> placed;
+  for (u32 i = 0; i < COUNT; ++i)
+    placed.push_back(loader.place(MODEL));
+  REQUIRE(loader.settle() == COUNT);
+
+  const SharedMoc *const shared =
+      loader.registry.get<Live2DRuntime>(placed[0]).asset.moc().get();
+  REQUIRE(shared != nullptr);
+  usize others = 0;
+  for (const scene::Entity e : placed)
+    others += loader.registry.get<Live2DRuntime>(e).asset.moc().get() != shared
+                  ? 1u
+                  : 0u;
+  CHECK(others == 0u);
+}
+
 TEST_CASE("live2d loading: a model changed mid-load drops what was loading") {
   REQUIRE_BUNDLED();
   Loader loader;
