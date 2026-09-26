@@ -99,11 +99,12 @@ void Animator::update(const f32 dt) {
   owner->_motionManager->UpdateMotion(model, dt);
   model->SaveParameters();
 
-  if (owner->_expressionManager != nullptr)
-    owner->_expressionManager->UpdateMotion(model, dt);
-
   if (m_blinking && owner->_eyeBlink != nullptr)
     owner->_eyeBlink->UpdateParameters(model, dt);
+  // After the blink, which sets the eyes outright: an expression that shuts
+  // or widens them multiplies what the blink left.
+  if (owner->_expressionManager != nullptr)
+    owner->_expressionManager->UpdateMotion(model, dt);
   if (m_breathing && owner->_breath != nullptr)
     owner->_breath->UpdateParameters(model, dt);
 

@@ -36,6 +36,9 @@ nxtest_discover_tests(nx_live2d_tests LABELS live2d-proprietary)
 set(_live2d_bundled "${CMAKE_CURRENT_BINARY_DIR}/bundled")
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/../templates/model/assets/live2d"
         DESTINATION "${_live2d_bundled}")
+# Hiyori has no expressions; this manifest gives her moc one.
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/data/"
+        DESTINATION "${_live2d_bundled}/live2d")
 
 add_executable(nx_live2d_bundled_tests test_live2d_bundled.cpp
         test_live2d_asset_bundle.cpp test_live2d_loading.cpp)

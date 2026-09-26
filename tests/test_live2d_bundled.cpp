@@ -120,6 +120,32 @@ TEST_CASE("live2d: models of one file share its moc and mesh, not their pose") {
   CHECK(a != b);
 }
 
+TEST_CASE("live2d: blinking does not undo an expression's eyes") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  ModelAsset asset;
+  nx::string error;
+  REQUIRE(
+      load_model("/live2d/Hiyori.expression.model3.json", {}, asset, error));
+  REQUIRE(asset.has_eye_blink());
+  Animator animator(asset);
+  animator.set_blinking(true);
+  REQUIRE(animator.set_expression("EyesShut"));
+
+  for (u32 i = 0; i < 30; ++i)
+    animator.update(1.f / 60.f);
+  // Long enough for several blinks, each of which reopens the eyes unless
+  // the expression is applied over it.
+  f32 widest = 0.f;
+  for (u32 i = 0; i < 600; ++i) {
+    animator.update(1.f / 60.f);
+    widest = nx::max(widest, animator.parameter("ParamEyeLOpen"));
+  }
+  CHECK(widest < 0.05f);
+}
+
 TEST_CASE("live2d: a shared moc outlives each model and goes with the last") {
   REQUIRE_BUNDLED();
   Mounted mount;
