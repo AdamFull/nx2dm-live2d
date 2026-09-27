@@ -146,6 +146,41 @@ TEST_CASE("live2d: blinking does not undo an expression's eyes") {
   CHECK(widest < 0.05f);
 }
 
+TEST_CASE("live2d: an expression's weight sets how far it moves the model") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  ModelAsset asset;
+  nx::string error;
+  REQUIRE(
+      load_model("/live2d/Hiyori.expression.model3.json", {}, asset, error));
+  Animator animator(asset);
+  const auto settle = [&](const f32 seconds) {
+    for (f32 at = 0.f; at < seconds; at += 1.f / 60.f)
+      animator.update(1.f / 60.f);
+    return animator.parameter("ParamEyeLOpen");
+  };
+  const f32 open = settle(0.5f);
+  REQUIRE(open > 0.9f);
+
+  REQUIRE(animator.set_expression("EyesShut"));
+  CHECK(settle(1.f) < 0.05f);
+
+  animator.set_expression_weight(0.5f, 0.f);
+  CHECK(settle(0.1f) == nxtest::Approx(open * 0.5f).margin(0.05f));
+  animator.set_expression_weight(0.f, 0.f);
+  CHECK(settle(0.1f) == nxtest::Approx(open).margin(0.02f));
+
+  // Eased: part of the way after a moment, all of it after the whole time.
+  animator.set_expression_weight(1.f);
+  const f32 easing = settle(EXPRESSION_WEIGHT_SECONDS * 0.5f);
+  CHECK(easing > 0.25f);
+  CHECK(easing < 0.75f);
+  CHECK(settle(EXPRESSION_WEIGHT_SECONDS) < 0.05f);
+  CHECK(animator.expression_weight() == 1.f);
+}
+
 TEST_CASE("live2d: a shared moc outlives each model and goes with the last") {
   REQUIRE_BUNDLED();
   Mounted mount;

@@ -44,6 +44,15 @@ void expose_live2d_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
     return runtime != nullptr && runtime->animator.set_expression(name);
   });
 
+  host.expose_as("live2d_expression_weight",
+                 [&ctx](const sys::Entity e, const f32 weight) {
+                   Live2DRuntime *const runtime = runtime_of(ctx, e);
+                   if (runtime == nullptr)
+                     return false;
+                   runtime->animator.set_expression_weight(weight);
+                   return true;
+                 });
+
   host.expose_as("live2d_finished", [&ctx](const sys::Entity e) {
     const Live2DRuntime *const runtime = runtime_of(ctx, e);
     return runtime == nullptr || runtime->animator.motion_finished();

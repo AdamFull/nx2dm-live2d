@@ -4,6 +4,9 @@
 
 namespace nxm::live2d {
 
+/// How long a change of expression weight takes to go all the way.
+inline constexpr f32 EXPRESSION_WEIGHT_SECONDS = 0.5f;
+
 class Animator {
 public:
   Animator() = default;
@@ -18,6 +21,13 @@ public:
                                      f32 &duration) const;
 
   bool set_expression(nx::string_view name);
+  /// How strongly the expression shows, from 0 (not at all) to 1, eased
+  /// there over @p ease seconds of updates.
+  void set_expression_weight(f32 weight,
+                             f32 ease = EXPRESSION_WEIGHT_SECONDS) noexcept;
+  [[nodiscard]] f32 expression_weight() const noexcept {
+    return m_expression_weight;
+  }
 
   void update(f32 dt);
 
@@ -49,6 +59,12 @@ public:
 private:
   ModelAsset *m_asset = nullptr;
   nx::string m_expression;
+  f32 m_expression_weight = 1.f;
+  f32 m_expression_target = 1.f;
+  f32 m_expression_ease = 0.f;
+  /// The parameters as they were before the expression, while it shows at
+  /// less than full weight.
+  nx::vector<f32> m_unexpressed;
   nx::string m_motion_group;
   i32 m_motion_index = 0;
   bool m_motion_loop = false;

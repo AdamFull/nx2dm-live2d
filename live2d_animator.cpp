@@ -88,6 +88,14 @@ bool Animator::set_expression(const nx::string_view name) {
   return true;
 }
 
+void Animator::set_expression_weight(const f32 weight,
+                                     const f32 ease) noexcept {
+  m_expression_target = nx::clamp(weight, 0.f, 1.f);
+  m_expression_ease = nx::max(ease, 0.f);
+  if (m_expression_ease == 0.f)
+    m_expression_weight = m_expression_target;
+}
+
 void Animator::update(const f32 dt) {
   Exposed *const owner = reach(m_asset);
   if (owner == nullptr)
@@ -103,8 +111,32 @@ void Animator::update(const f32 dt) {
     owner->_eyeBlink->UpdateParameters(model, dt);
   // After the blink, which sets the eyes outright: an expression that shuts
   // or widens them multiplies what the blink left.
-  if (owner->_expressionManager != nullptr)
+  if (owner->_expressionManager != nullptr) {
+    if (m_expression_weight != m_expression_target) {
+      const f32 step = m_expression_ease > 0.f ? dt / m_expression_ease : 1.f;
+      m_expression_weight =
+          m_expression_weight < m_expression_target
+              ? nx::min(m_expression_weight + step, m_expression_target)
+              : nx::max(m_expression_weight - step, m_expression_target);
+    }
+    // At less than full weight the expression moves each parameter only
+    // that far from where the motion and the blink left it.
+    const bool partial = m_expression_weight < 1.f;
+    const i32 count = model->GetParameterCount();
+    if (partial) {
+      m_unexpressed.resize(nx::cast<usize>(count));
+      for (i32 i = 0; i < count; ++i)
+        m_unexpressed[nx::cast<usize>(i)] = model->GetParameterValue(i);
+    }
     owner->_expressionManager->UpdateMotion(model, dt);
+    if (partial)
+      for (i32 i = 0; i < count; ++i) {
+        const f32 before = m_unexpressed[nx::cast<usize>(i)];
+        model->SetParameterValue(i, before +
+                                        (model->GetParameterValue(i) - before) *
+                                            m_expression_weight);
+      }
+  }
   if (m_breathing && owner->_breath != nullptr)
     owner->_breath->UpdateParameters(model, dt);
 

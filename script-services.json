@@ -9,6 +9,10 @@
       "signature": "(number,string)->(boolean)"
     },
     {
+      "name": "live2d_expression_weight",
+      "signature": "(number,number)->(boolean)"
+    },
+    {
       "name": "live2d_finished",
       "signature": "(number)->(boolean)"
     },

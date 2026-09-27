@@ -326,6 +326,7 @@ usize Live2DSystem::reload_changed(scene::registry_t &registry) {
         const i32 motion_index = runtime.animator.motion_index();
         const bool motion_loop = runtime.animator.motion_loop();
         const nx::string expression(runtime.animator.expression());
+        const f32 expression_weight = runtime.animator.expression_weight();
         const f32 elapsed = runtime.animator.elapsed();
         const bool blinking = runtime.animator.blinking();
         const bool breathing = runtime.animator.breathing();
@@ -344,6 +345,7 @@ usize Live2DSystem::reload_changed(scene::registry_t &registry) {
                                     0.f);
         if (!expression.empty())
           (void)fresh.animator.set_expression(expression.view());
+        fresh.animator.set_expression_weight(expression_weight, 0.f);
         fresh.animator.update(elapsed);
         (void)fresh.masks.build(fresh.asset,
                                 mask_resolution(model.mask_resolution), 1);
