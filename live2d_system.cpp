@@ -331,6 +331,8 @@ usize Live2DSystem::reload_changed(scene::registry_t &registry) {
         const bool blinking = runtime.animator.blinking();
         const bool breathing = runtime.animator.breathing();
         const f32 mouth = runtime.animator.mouth();
+        const f32 look_x = runtime.animator.look_x();
+        const f32 look_y = runtime.animator.look_y();
 
         Live2DRuntime fresh;
         fresh.asset = std::move(fresh_asset);
@@ -340,6 +342,7 @@ usize Live2DSystem::reload_changed(scene::registry_t &registry) {
         fresh.animator.set_blinking(blinking);
         fresh.animator.set_breathing(breathing);
         fresh.animator.set_mouth(mouth);
+        fresh.animator.set_look(look_x, look_y, false);
         if (!motion.empty())
           (void)fresh.animator.play(motion.view(), motion_index, motion_loop,
                                     0.f);

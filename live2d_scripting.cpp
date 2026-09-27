@@ -53,6 +53,15 @@ void expose_live2d_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
                    return true;
                  });
 
+  host.expose_as("live2d_look", [&ctx](const sys::Entity e, const f32 x,
+                                       const f32 y) {
+    Live2DRuntime *const runtime = runtime_of(ctx, e);
+    if (runtime == nullptr)
+      return false;
+    runtime->animator.set_look(x, y);
+    return true;
+  });
+
   host.expose_as("live2d_finished", [&ctx](const sys::Entity e) {
     const Live2DRuntime *const runtime = runtime_of(ctx, e);
     return runtime == nullptr || runtime->animator.motion_finished();

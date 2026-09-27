@@ -2,6 +2,7 @@
 
 #include "core/foundation/diagnostics/log.h"
 
+#include <CubismDefaultParameterId.hpp>
 #include <Effect/CubismBreath.hpp>
 #include <Effect/CubismEyeBlink.hpp>
 #include <Id/CubismIdManager.hpp>
@@ -96,6 +97,15 @@ void Animator::set_expression_weight(const f32 weight,
     m_expression_weight = m_expression_target;
 }
 
+void Animator::set_look(const f32 x, const f32 y, const bool eased) noexcept {
+  m_look_target_x = nx::clamp(x, -1.f, 1.f);
+  m_look_target_y = nx::clamp(y, -1.f, 1.f);
+  if (!eased) {
+    m_look_x = m_look_target_x;
+    m_look_y = m_look_target_y;
+  }
+}
+
 void Animator::update(const f32 dt) {
   Exposed *const owner = reach(m_asset);
   if (owner == nullptr)
@@ -136,6 +146,23 @@ void Animator::update(const f32 dt) {
                                         (model->GetParameterValue(i) - before) *
                                             m_expression_weight);
       }
+  }
+  const f32 follow = 1.f - std::exp(-nx::max(dt, 0.f) / LOOK_SECONDS);
+  m_look_x += (m_look_target_x - m_look_x) * follow;
+  m_look_y += (m_look_target_y - m_look_y) * follow;
+  if (m_look_x != 0.f || m_look_y != 0.f) {
+    // The ranges the Cubism samples turn a model through when it follows a
+    // drag.
+    csm::CubismIdManager *const ids = csm::CubismFramework::GetIdManager();
+    namespace id = csm::DefaultParameterId;
+    model->AddParameterValue(ids->GetId(id::ParamAngleX), m_look_x * 30.f);
+    model->AddParameterValue(ids->GetId(id::ParamAngleY), m_look_y * 30.f);
+    model->AddParameterValue(ids->GetId(id::ParamAngleZ),
+                             m_look_x * m_look_y * -30.f);
+    model->AddParameterValue(ids->GetId(id::ParamBodyAngleX),
+                             m_look_x * 10.f);
+    model->AddParameterValue(ids->GetId(id::ParamEyeBallX), m_look_x);
+    model->AddParameterValue(ids->GetId(id::ParamEyeBallY), m_look_y);
   }
   if (m_breathing && owner->_breath != nullptr)
     owner->_breath->UpdateParameters(model, dt);

@@ -7,6 +7,10 @@ namespace nxm::live2d {
 /// How long a change of expression weight takes to go all the way.
 inline constexpr f32 EXPRESSION_WEIGHT_SECONDS = 0.5f;
 
+/// How quickly the model turns to where it is asked to look: the time for
+/// about two thirds of the way.
+inline constexpr f32 LOOK_SECONDS = 0.15f;
+
 class Animator {
 public:
   Animator() = default;
@@ -43,6 +47,12 @@ public:
   [[nodiscard]] bool breathing() const noexcept { return m_breathing; }
 
   void set_mouth(f32 amount) noexcept { m_mouth = nx::clamp(amount, 0.f, 1.f); }
+  /// Where the model looks, from -1 to 1 across and up, 0 straight ahead;
+  /// it turns its head, body and eyes there over LOOK_SECONDS. @p eased
+  /// false turns it there at once.
+  void set_look(f32 x, f32 y, bool eased = true) noexcept;
+  [[nodiscard]] f32 look_x() const noexcept { return m_look_x; }
+  [[nodiscard]] f32 look_y() const noexcept { return m_look_y; }
   [[nodiscard]] f32 mouth() const noexcept { return m_mouth; }
 
   [[nodiscard]] bool motion_finished() const noexcept;
@@ -70,6 +80,10 @@ private:
   bool m_motion_loop = false;
   f32 m_elapsed = 0.f;
   f32 m_mouth = 0.f;
+  f32 m_look_x = 0.f;
+  f32 m_look_y = 0.f;
+  f32 m_look_target_x = 0.f;
+  f32 m_look_target_y = 0.f;
   bool m_blinking = false;
   bool m_breathing = false;
 };

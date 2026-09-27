@@ -181,6 +181,53 @@ TEST_CASE("live2d: an expression's weight sets how far it moves the model") {
   CHECK(animator.expression_weight() == 1.f);
 }
 
+TEST_CASE("live2d: the model turns its head, body and eyes to where it is "
+          "asked to look") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  ModelAsset asset;
+  nx::string error;
+  REQUIRE(load_model(MODEL, {}, asset, error));
+  Animator animator(asset);
+  const auto settle = [&](const f32 seconds) {
+    for (f32 at = 0.f; at < seconds; at += 1.f / 60.f)
+      animator.update(1.f / 60.f);
+  };
+  settle(0.5f);
+  CHECK(animator.parameter("ParamAngleX") == nxtest::Approx(0.f).margin(0.01f));
+
+  animator.set_look(1.f, 0.f);
+  settle(1.f / 60.f);
+  // On its way, not there yet.
+  const f32 turning = animator.parameter("ParamAngleX");
+  CHECK(turning > 1.f);
+  CHECK(turning < 10.f);
+  settle(1.f);
+  CHECK(animator.parameter("ParamAngleX") ==
+        nxtest::Approx(30.f).margin(0.5f));
+  CHECK(animator.parameter("ParamBodyAngleX") ==
+        nxtest::Approx(10.f).margin(0.2f));
+  CHECK(animator.parameter("ParamEyeBallX") ==
+        nxtest::Approx(1.f).margin(0.02f));
+  CHECK(animator.parameter("ParamAngleY") ==
+        nxtest::Approx(0.f).margin(0.01f));
+
+  // Out of range is the edge; at once is at once.
+  animator.set_look(0.f, -4.f, false);
+  settle(1.f / 60.f);
+  CHECK(animator.parameter("ParamAngleY") == nxtest::Approx(-30.f));
+  CHECK(animator.parameter("ParamAngleX") ==
+        nxtest::Approx(0.f).margin(0.01f));
+  CHECK(animator.parameter("ParamEyeBallY") == nxtest::Approx(-1.f));
+
+  animator.set_look(0.f, 0.f);
+  settle(1.5f);
+  CHECK(animator.parameter("ParamAngleY") ==
+        nxtest::Approx(0.f).margin(0.05f));
+}
+
 TEST_CASE("live2d: a shared moc outlives each model and goes with the last") {
   REQUIRE_BUNDLED();
   Mounted mount;
