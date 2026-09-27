@@ -205,27 +205,23 @@ TEST_CASE("live2d: the model turns its head, body and eyes to where it is "
   CHECK(turning > 1.f);
   CHECK(turning < 10.f);
   settle(1.f);
-  CHECK(animator.parameter("ParamAngleX") ==
-        nxtest::Approx(30.f).margin(0.5f));
+  CHECK(animator.parameter("ParamAngleX") == nxtest::Approx(30.f).margin(0.5f));
   CHECK(animator.parameter("ParamBodyAngleX") ==
         nxtest::Approx(10.f).margin(0.2f));
   CHECK(animator.parameter("ParamEyeBallX") ==
         nxtest::Approx(1.f).margin(0.02f));
-  CHECK(animator.parameter("ParamAngleY") ==
-        nxtest::Approx(0.f).margin(0.01f));
+  CHECK(animator.parameter("ParamAngleY") == nxtest::Approx(0.f).margin(0.01f));
 
   // Out of range is the edge; at once is at once.
   animator.set_look(0.f, -4.f, false);
   settle(1.f / 60.f);
   CHECK(animator.parameter("ParamAngleY") == nxtest::Approx(-30.f));
-  CHECK(animator.parameter("ParamAngleX") ==
-        nxtest::Approx(0.f).margin(0.01f));
+  CHECK(animator.parameter("ParamAngleX") == nxtest::Approx(0.f).margin(0.01f));
   CHECK(animator.parameter("ParamEyeBallY") == nxtest::Approx(-1.f));
 
   animator.set_look(0.f, 0.f);
   settle(1.5f);
-  CHECK(animator.parameter("ParamAngleY") ==
-        nxtest::Approx(0.f).margin(0.05f));
+  CHECK(animator.parameter("ParamAngleY") == nxtest::Approx(0.f).margin(0.05f));
 }
 
 TEST_CASE("live2d: a shared moc outlives each model and goes with the last") {
