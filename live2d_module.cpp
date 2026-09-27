@@ -95,7 +95,9 @@ public:
         nxe::sys::SystemFn([this, &ctx](const nxe::sys::Context &c) {
           if (m_textures.pump(ctx) != 0)
             (void)m_system.refresh_textures(ctx.scene().registry());
-          (void)m_system.load_pending(ctx.scene().registry(), c.dt);
+          const usize loaded =
+              m_system.load_pending(ctx.scene().registry(), c.dt);
+          release_unused_textures(ctx, loaded != 0);
         }));
     ctx.schedule().add(nxe::sys::Stage::Update, LOAD_SYSTEM);
 
@@ -246,7 +248,29 @@ private:
 
   ModelRenderer m_renderer;
   Live2DSystem m_system;
+  /// Lets go of texture pages no model uses any more, once a model has come
+  /// or gone: a companion switched out must not keep its pages resident.
+  void release_unused_textures(nxe::ModuleContext &ctx, const bool loaded) {
+    m_in_use.clear();
+    const usize models =
+        m_system.textures_in_use(ctx.scene().registry(), m_in_use);
+    if (!loaded && models == m_swept_models)
+      return;
+    m_swept_models = models;
+    const usize released =
+        m_textures.release_unused(ctx, [this](const nx::string_view path) {
+          for (const nx::string_view used : m_in_use)
+            if (used == path)
+              return true;
+          return false;
+        });
+    if (released != 0)
+      nx::logd("live2d: released {} texture pages no model uses", released);
+  }
+
   nxe::AsyncTextureSet m_textures;
+  nx::vector<nx::string_view> m_in_use;
+  usize m_swept_models = 0;
   nxe::PipelineLoadRequest m_mask_request;
   nxe::PipelineLoadRequest
       m_model_requests[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};

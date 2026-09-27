@@ -62,6 +62,10 @@ public:
   /// Resolves every loaded model's texture pages again, for pages that have
   /// arrived since it loaded. Returns how many models changed.
   usize refresh_textures(nxe::scene::registry_t &registry);
+  /// Adds to @p out the texture paths the models use now, and returns how
+  /// many models there are, loaded or not.
+  usize textures_in_use(nxe::scene::registry_t &registry,
+                        nx::vector<nx::string_view> &out) const;
 
   usize update(nxe::scene::registry_t &registry,
                const nxe::scene::AssetRegistry &assets, f32 dt);

@@ -162,6 +162,10 @@ public:
   [[nodiscard]] std::span<const u32> textures() const noexcept {
     return {m_textures.data(), m_textures.size()};
   }
+  /// Where each of textures() comes from.
+  [[nodiscard]] std::span<const nx::string> texture_paths() const noexcept {
+    return {m_texture_paths.data(), m_texture_paths.size()};
+  }
 
   [[nodiscard]] std::span<const MotionEntry> motions() const noexcept {
     return {m_motions.data(), m_motions.size()};

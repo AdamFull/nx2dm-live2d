@@ -271,3 +271,35 @@ TEST_CASE("live2d loading: ids registered from many threads stay one table") {
             : 0u;
   CHECK(wrong == 0u);
 }
+
+TEST_CASE("live2d loading: the textures in use are those of the models "
+          "there now") {
+  REQUIRE_BUNDLED();
+  Loader loader;
+  REQUIRE(loader.ok);
+  const scene::Entity first = loader.place(MODEL);
+  const scene::Entity second = loader.place(MODEL);
+  CHECK(loader.settle() == usize{2});
+
+  nx::vector<nx::string_view> in_use;
+  CHECK(loader.system.textures_in_use(loader.registry, in_use) == usize{2});
+  const usize per_model = in_use.size() / 2;
+  REQUIRE(per_model > 0);
+  for (const nx::string_view path : in_use)
+    CHECK(path.starts_with("/live2d/"));
+
+  loader.registry.destroy(first);
+  in_use.clear();
+  CHECK(loader.system.textures_in_use(loader.registry, in_use) == usize{1});
+  CHECK(in_use.size() == per_model);
+
+  // Switched to a model that is not there: nothing of the old one is used.
+  loader.registry.get<Live2DModel>(second).model = nx::string(MISSING);
+  (void)loader.settle();
+  in_use.clear();
+  CHECK(loader.system.textures_in_use(loader.registry, in_use) == usize{1});
+  CHECK(in_use.empty());
+
+  loader.registry.destroy(second);
+  CHECK(loader.system.textures_in_use(loader.registry, in_use) == usize{0});
+}

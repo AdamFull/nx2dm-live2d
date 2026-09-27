@@ -297,6 +297,18 @@ usize Live2DSystem::refresh_textures(scene::registry_t &registry) {
   return changed;
 }
 
+usize Live2DSystem::textures_in_use(scene::registry_t &registry,
+                                    nx::vector<nx::string_view> &out) const {
+  usize models = 0;
+  registry.view<Live2DRuntime>().each(
+      [&](const scene::Entity, const Live2DRuntime &runtime) {
+        ++models;
+        for (const nx::string &path : runtime.asset.texture_paths())
+          out.push_back(path.view());
+      });
+  return models;
+}
+
 usize Live2DSystem::reload_changed(scene::registry_t &registry) {
   usize loaded = 0;
   registry.view<const Live2DModel, Live2DRuntime>().each(
