@@ -8,6 +8,9 @@
 #include <Model/CubismModel.hpp>
 #include <Rendering/csmBlendMode.hpp>
 
+#include <glm/common.hpp>
+#include <glm/matrix.hpp>
+
 #include <algorithm>
 #include <cstring>
 
@@ -87,6 +90,41 @@ DrawableMesh drawable_mesh(const ModelAsset &asset,
       {reinterpret_cast<const glm::vec2 *>(uvs), count},
       {source, nx::cast<usize>(indices)},
   };
+}
+
+nx::small_vector<nx::string_view, 4> hit_areas_at(const ModelAsset &asset,
+                                                  const glm::vec2 local) {
+  nx::small_vector<nx::string_view, 4> out;
+  for (const HitArea &area : asset.hit_areas()) {
+    const DrawableMesh mesh = drawable_mesh(asset, area.index);
+    if (mesh.positions.empty())
+      continue;
+    glm::vec2 low = mesh.positions[0];
+    glm::vec2 high = low;
+    for (const glm::vec2 point : mesh.positions) {
+      low = glm::min(low, point);
+      high = glm::max(high, point);
+    }
+    if (local.x >= low.x && local.x <= high.x && local.y >= low.y &&
+        local.y <= high.y)
+      out.push_back(area.name.view());
+  }
+  return out;
+}
+
+std::optional<glm::vec2> model_point(const Live2DModel &model,
+                                     const nxe::scene::WorldTransform2D &node,
+                                     const glm::vec2 world) noexcept {
+  // As emit places it: the node's transform, its axes scaled.
+  glm::mat3 placed = node.world;
+  placed[0] *= model.scale;
+  placed[1] *= model.scale;
+  const f32 determinant =
+      placed[0][0] * placed[1][1] - placed[1][0] * placed[0][1];
+  if (glm::abs(determinant) < 1e-12f)
+    return std::nullopt;
+  const glm::vec3 local = glm::inverse(placed) * glm::vec3(world, 1.f);
+  return glm::vec2(local.x, local.y);
 }
 
 bool drawable_visible(const ModelAsset &asset, const i32 drawable) noexcept {

@@ -238,6 +238,7 @@ ModelAsset::ModelAsset(ModelAsset &&other) noexcept
       m_expressions(std::move(other.m_expressions)),
       m_missing(std::move(other.m_missing)),
       m_lip_sync(std::move(other.m_lip_sync)),
+      m_hit_areas(std::move(other.m_hit_areas)),
       m_dependencies(std::move(other.m_dependencies)), m_canvas(other.m_canvas),
       m_moc(std::move(other.m_moc)), m_physics(other.m_physics),
       m_pose(other.m_pose), m_eye_blink(other.m_eye_blink) {
@@ -254,6 +255,7 @@ ModelAsset &ModelAsset::operator=(ModelAsset &&other) noexcept {
     m_expressions = std::move(other.m_expressions);
     m_missing = std::move(other.m_missing);
     m_lip_sync = std::move(other.m_lip_sync);
+    m_hit_areas = std::move(other.m_hit_areas);
     m_dependencies = std::move(other.m_dependencies);
     m_canvas = other.m_canvas;
     m_moc = std::move(other.m_moc);
@@ -284,6 +286,7 @@ void ModelAsset::reset() noexcept {
   m_texture_paths.clear();
   m_missing.clear();
   m_lip_sync.clear();
+  m_hit_areas.clear();
   m_dependencies.clear();
   m_canvas = {};
   m_moc = {};
@@ -673,6 +676,17 @@ bool build_model(const ModelSource &source, ModelAsset &out, nx::string &error,
     if (const csm::CubismIdHandle id = settings.GetLipSyncParameterId(i);
         id != nullptr)
       out.m_lip_sync.push_back(nx::string(id->GetString().GetRawString()));
+
+  for (i32 i = 0; i < settings.GetHitAreasCount(); ++i) {
+    const csm::CubismIdHandle id = settings.GetHitAreaId(i);
+    const char *const name = settings.GetHitAreaName(i);
+    if (id == nullptr || name == nullptr)
+      continue;
+    out.m_hit_areas.push_back(
+        {.name = nx::string(name),
+         .drawable = nx::string(id->GetString().GetRawString()),
+         .index = owner->GetModel()->GetDrawableIndex(id)});
+  }
 
   owner->_breath = csm::CubismBreath::Create();
   if (owner->_breath != nullptr) {

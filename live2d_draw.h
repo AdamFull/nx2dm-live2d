@@ -4,10 +4,15 @@
 #include "live2d/live2d_assets.h"
 #include "live2d/live2d_mask.h"
 
+#include "core/foundation/containers/small_vector.h"
+#include "live2d/live2d_component.h"
+#include "scene/components.h"
+
 #include <glm/mat3x3.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec4.hpp>
 
+#include <optional>
 #include <span>
 
 namespace nxm::live2d {
@@ -28,6 +33,18 @@ struct DrawableMesh {
 
 [[nodiscard]] bool drawable_visible(const ModelAsset &asset,
                                     i32 drawable) noexcept;
+
+/// The hit areas covering @p local, a point in model space, in the order the
+/// model lists them: each by the rectangle its drawable spans in the pose the
+/// model was last updated to, as Cubism's own hit test does.
+[[nodiscard]] nx::small_vector<nx::string_view, 4>
+hit_areas_at(const ModelAsset &asset, glm::vec2 local);
+
+/// @p world in the space of the model @p model draws where @p node places
+/// it; nothing where that placement cannot be undone.
+[[nodiscard]] std::optional<glm::vec2>
+model_point(const Live2DModel &model, const nxe::scene::WorldTransform2D &node,
+            glm::vec2 world) noexcept;
 
 struct ModelView {
   glm::mat3 world{1.f};

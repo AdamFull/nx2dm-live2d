@@ -21,6 +21,14 @@ namespace nxm::live2d {
 
 using TextureResolver = nx::function<u32(nx::string_view path)>;
 
+/// A part of the model a pointer may touch, as the model3.json names it,
+/// and the drawable it is: -1 where the moc has no drawable of that id.
+struct HitArea {
+  nx::string name;
+  nx::string drawable;
+  i32 index = -1;
+};
+
 struct MotionEntry {
   nx::string group;
   i32 index = 0;
@@ -186,6 +194,9 @@ public:
   [[nodiscard]] std::span<const nx::string> lip_sync() const noexcept {
     return {m_lip_sync.data(), m_lip_sync.size()};
   }
+  [[nodiscard]] std::span<const HitArea> hit_areas() const noexcept {
+    return {m_hit_areas.data(), m_hit_areas.size()};
+  }
 
   [[nodiscard]] std::span<const nx::string> missing() const noexcept {
     return {m_missing.data(), m_missing.size()};
@@ -208,6 +219,7 @@ private:
   nx::vector<ExpressionEntry> m_expressions;
   nx::vector<nx::string> m_missing;
   nx::vector<nx::string> m_lip_sync;
+  nx::vector<HitArea> m_hit_areas;
   nx::vector<nx::string> m_dependencies;
   CanvasInfo m_canvas;
   nx::shared_ptr<SharedMoc> m_moc;

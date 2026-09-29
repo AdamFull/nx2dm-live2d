@@ -4,6 +4,9 @@
 #include "core/foundation/vfs/vfs.h"
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_assets.h"
+#include "live2d/live2d_draw.h"
+
+#include <glm/common.hpp>
 
 namespace {
 
@@ -295,4 +298,57 @@ TEST_CASE("live2d: a moc of another generation is never reused") {
   (void)mocs.add("/m.moc3", 2u, moc);
   CHECK(mocs.size() == 1u);
   CHECK_FALSE(mocs.find("/m.moc3", 1u));
+}
+
+TEST_CASE("live2d: a hit area is where its drawable is in the pose") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  ModelAsset asset;
+  nx::string error;
+  REQUIRE(load_model(MODEL, {}, asset, error));
+  REQUIRE(asset.hit_areas().size() == 1u);
+  const HitArea &body = asset.hit_areas()[0];
+  CHECK(body.name == "Body");
+  CHECK(body.drawable == "HitArea");
+  REQUIRE(body.index >= 0);
+  Animator animator(asset);
+  animator.update(1.f / 60.f);
+
+  const DrawableMesh mesh = drawable_mesh(asset, body.index);
+  REQUIRE_FALSE(mesh.positions.empty());
+  glm::vec2 low = mesh.positions[0];
+  glm::vec2 high = low;
+  for (const glm::vec2 point : mesh.positions) {
+    low = glm::min(low, point);
+    high = glm::max(high, point);
+  }
+  const glm::vec2 middle = (low + high) * 0.5f;
+  const auto inside = hit_areas_at(asset, middle);
+  REQUIRE(inside.size() == 1u);
+  CHECK(inside[0] == "Body");
+  CHECK(hit_areas_at(asset, low).size() == 1u);
+  CHECK(hit_areas_at(asset, high).size() == 1u);
+  const glm::vec2 span = high - low;
+  CHECK(hit_areas_at(asset, low - span * 0.01f).empty());
+  CHECK(hit_areas_at(asset, {high.x + span.x * 0.01f, middle.y}).empty());
+  CHECK(hit_areas_at(asset, {middle.x, high.y + span.y * 0.01f}).empty());
+  CHECK(hit_areas_at(asset, {middle.x, low.y - span.y * 0.01f}).empty());
+  CHECK(hit_areas_at(asset, {low.x - span.x * 0.01f, middle.y}).empty());
+
+  // Where the model is drawn: moved, scaled, and back to model space.
+  Live2DModel model;
+  model.scale = 2.f;
+  nxe::scene::WorldTransform2D node;
+  node.world[2] = glm::vec3(3.f, -1.f, 1.f);
+  // Off both axes, so neither one's scale can go unseen.
+  const glm::vec2 point(0.25f, -0.4f);
+  const std::optional<glm::vec2> local =
+      model_point(model, node, {3.f + point.x * 2.f, -1.f + point.y * 2.f});
+  REQUIRE(local.has_value());
+  CHECK(local->x == nxtest::Approx(point.x).margin(1e-4f));
+  CHECK(local->y == nxtest::Approx(point.y).margin(1e-4f));
+  model.scale = 0.f;
+  CHECK_FALSE(model_point(model, node, {0.f, 0.f}).has_value());
 }
