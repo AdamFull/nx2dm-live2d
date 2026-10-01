@@ -7,6 +7,7 @@
 #include "core/foundation/threading/thread_pool.h"
 #include "core/foundation/vfs/asset_pipeline.h"
 #include "scene/animation/animation_graph.h"
+#include "scene/components.h"
 
 namespace nxe::r2d {
 class MaterialSystem;
@@ -37,6 +38,8 @@ using ModelLoadPipeline =
 
 struct SceneView {
   u32 camera = 0;
+  /// The render layers this view draws: only models on one of them.
+  u32 layers = nxe::scene::WINDOW_LAYER;
   f32 depth_min = -1024.f;
   f32 depth_max = 1024.f;
   const nxe::r2d::MaterialSystem *materials = nullptr;

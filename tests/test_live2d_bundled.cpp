@@ -5,6 +5,7 @@
 #include "live2d/live2d_animator.h"
 #include "live2d/live2d_assets.h"
 #include "live2d/live2d_draw.h"
+#include "live2d/live2d_system.h"
 
 #include <glm/common.hpp>
 
@@ -85,6 +86,43 @@ TEST_CASE("live2d: the bundled model loads with a moc, canvas and motions") {
 
   CHECK(asset.has_physics());
   CHECK(!asset.motions().empty());
+}
+
+TEST_CASE("live2d: a view draws only the models on its layers") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+  namespace scene = nxe::scene;
+  scene::registry_t registry;
+  registry.register_component<scene::WorldTransform2D>(
+      {.name = "WorldTransform2D"});
+  registry.register_component<scene::RenderLayers>({.name = "RenderLayers"});
+  Live2DSystem::register_components(registry);
+  Live2DSystem system;
+  system.set_resolver(
+      TextureResolver([](nx::string_view) { return pack_texture(1, 0); }));
+  const scene::Entity e = registry.create();
+  registry.emplace<scene::WorldTransform2D>(e);
+  registry.emplace<Live2DModel>(e).model = nx::string(MODEL);
+  REQUIRE(system.load_pending(registry) == 1u);
+
+  // The window's view, by default, and a model on no layer of its own.
+  Frame window;
+  CHECK(system.emit(registry, window, {}) == 1u);
+
+  registry.emplace<scene::RenderLayers>(e, scene::RenderLayers{.mask = 2u});
+  Frame hidden;
+  CHECK(system.emit(registry, hidden, {}) == 0u);
+  CHECK(hidden.models.empty());
+  Frame preview;
+  CHECK(system.emit(registry, preview, {.camera = 3, .layers = 2u}) == 1u);
+  REQUIRE(preview.models.size() == 1u);
+  CHECK(preview.models[0].camera == 3u);
+  // On both, both see it.
+  registry.get<scene::RenderLayers>(e).mask = 2u | scene::WINDOW_LAYER;
+  Frame both;
+  CHECK(system.emit(registry, both, {}) == 1u);
+  registry.clear();
 }
 
 TEST_CASE("live2d: models of one file share its moc and mesh, not their pose") {

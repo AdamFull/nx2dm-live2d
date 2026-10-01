@@ -406,7 +406,7 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
     const u32 first = m_stream.atlas_first[atlas_index];
     const u32 count = m_stream.atlas_first[atlas_index + 1u] - first;
     graph.add_pass(
-        nx::format("live2d.masks.{}", atlas_index).view(),
+        nx::format("{}.masks.{}", m_name, atlas_index).view(),
         rg::SetupFn([atlas](rg::Builder &builder) {
           builder.color(0, atlas, rhi::clear_color(0.f, 0.f, 0.f, 0.f));
         }),
@@ -442,7 +442,8 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
       blends.push_back(draw.blend);
 
   graph.add_pass(
-      "live2d.model", rg::SetupFn([target, atlases](rg::Builder &builder) {
+      nx::format("{}.model", m_name).view(),
+      rg::SetupFn([target, atlases](rg::Builder &builder) {
         builder.color(0, target);
         for (const rg::TextureId atlas : atlases)
           builder.sample(atlas);

@@ -495,9 +495,11 @@ usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
 
   m_emit_count = 0;
   registry.view<Live2DModel, Live2DRuntime, scene::WorldTransform2D>().each(
-      [&](const scene::Entity, const Live2DModel &model, Live2DRuntime &runtime,
-          const scene::WorldTransform2D &node) {
-        if (!model.visible || !runtime.ready() || runtime.loaded != model.model)
+      [&](const scene::Entity e, const Live2DModel &model,
+          Live2DRuntime &runtime, const scene::WorldTransform2D &node) {
+        if (!model.visible || !runtime.ready() ||
+            runtime.loaded != model.model ||
+            (scene::render_layers(registry, e) & view.layers) == 0)
           return;
         if (m_emit_count == m_emit.size())
           m_emit.emplace_back();

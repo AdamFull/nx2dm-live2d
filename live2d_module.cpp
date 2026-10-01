@@ -10,6 +10,7 @@
 #include "scene/scene_json.h"
 
 #include "core/foundation/diagnostics/log.h"
+#include "core/foundation/strings/format.h"
 
 #include <glm/common.hpp>
 
@@ -17,6 +18,7 @@ namespace nxm::live2d {
 namespace {
 
 constexpr nx::string_view DRAW_PASS = "live2d.draw";
+constexpr nx::string_view TARGETS_PASS = "live2d.targets";
 constexpr nx::string_view LOAD_SYSTEM = "live2d.load";
 constexpr nx::string_view UPDATE_SYSTEM = "live2d.update";
 constexpr nx::string_view EMIT_SYSTEM = "live2d.emit";
@@ -26,6 +28,40 @@ constexpr nx::string_view SHADER = "live2d/live2d";
 constexpr nxe::ModuleService PROVIDED_SERVICES[] = {
     {.id = SERVICE, .version = {1, 0, 0}},
 };
+
+/// The models each camera with a render target sees, one frame each.
+struct TargetModels {
+  nx::vector<Frame> frames;
+  nx::vector<u32> cameras;
+  usize count = 0;
+
+  void clear() noexcept { count = 0; }
+
+  [[nodiscard]] const Frame *find(const u32 camera) const noexcept {
+    for (usize i = 0; i < count; ++i)
+      if (cameras[i] == camera)
+        return &frames[i];
+    return nullptr;
+  }
+};
+
+/// What @p camera of @p packet sees, on @p layers.
+[[nodiscard]] SceneView view_of(nxe::ModuleContext &ctx,
+                                const nxe::r2d::FramePacket &packet,
+                                const u32 camera, const u32 layers) {
+  SceneView view{.camera = camera,
+                 .layers = layers,
+                 .depth_min = ctx.renderer().depth_min(),
+                 .depth_max = ctx.renderer().depth_max(),
+                 .materials = ctx.renderer().materials()};
+  if (camera < packet.cameras.size()) {
+    const GpuCamera2D &seen = packet.cameras[camera];
+    view.pixels_per_unit =
+        0.5f * glm::abs(glm::vec2(seen.view_proj[0][0] * seen.viewport.x,
+                                  seen.view_proj[1][1] * seen.viewport.y));
+  }
+  return view;
+}
 
 class Live2DModule final : public nxe::Module {
 public:
@@ -50,6 +86,7 @@ public:
                                   : u64{16} << 20;
     m_system.set_mask_limits(max_mask_resolution, memory_budget);
     m_renderer.set_atlas_limit(max_mask_resolution);
+    m_atlas_limit = max_mask_resolution;
     m_system.set_threads(&ctx.threads());
     if (nx::vfs::AsyncIoService *const io = ctx.async_io())
       m_system.bind_loads(*io, ctx.threads());
@@ -118,23 +155,33 @@ public:
             return;
           Frame &frame = packet->channel<Frame>();
           frame.clear();
-          SceneView view{.camera = packet->active_camera,
-                         .depth_min = ctx.renderer().depth_min(),
-                         .depth_max = ctx.renderer().depth_max(),
-                         .materials = ctx.renderer().materials()};
-          if (packet->active_camera < packet->cameras.size()) {
-            const GpuCamera2D &camera = packet->cameras[packet->active_camera];
-            view.pixels_per_unit =
-                0.5f *
-                glm::abs(glm::vec2(camera.view_proj[0][0] * camera.viewport.x,
-                                   camera.view_proj[1][1] * camera.viewport.y));
+          (void)m_system.emit(ctx.scene().registry(), frame,
+                              view_of(ctx, *packet, packet->active_camera,
+                                      nxe::scene::WINDOW_LAYER));
+          // Each camera drawing into a texture sees its own layers.
+          TargetModels &targets = packet->channel<TargetModels>();
+          targets.clear();
+          for (const nxe::r2d::TargetView &target : packet->targets) {
+            if (targets.count == nxe::MAX_RENDER_TARGETS)
+              break;
+            if (targets.count == targets.frames.size()) {
+              targets.frames.emplace_back();
+              targets.cameras.push_back(0);
+            }
+            Frame &seen = targets.frames[targets.count];
+            seen.clear();
+            targets.cameras[targets.count] = target.camera;
+            ++targets.count;
+            (void)m_system.emit(
+                ctx.scene().registry(), seen,
+                view_of(ctx, *packet, target.camera, target.layers));
           }
-          (void)m_system.emit(ctx.scene().registry(), frame, view);
         }));
     ctx.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
     ctx.schedule()
         .declare<const Live2DModel, Live2DRuntime,
-                 const nxe::scene::WorldTransform2D>(EMIT_SYSTEM);
+                 const nxe::scene::WorldTransform2D,
+                 const nxe::scene::RenderLayers>(EMIT_SYSTEM);
 
     ctx.passes().define(
         DRAW_PASS, nxe::PassFn([this, &ctx](nxe::rg::RenderGraph &graph,
@@ -161,6 +208,34 @@ public:
     if (!ctx.fill_pass_slot(slot, MINE, name()))
       nx::logw("live2d: nothing to fill; the frame has no '{}' slot", slot);
 
+    ctx.passes().define(
+        TARGETS_PASS, nxe::PassFn([this, &ctx](nxe::rg::RenderGraph &graph,
+                                               nxe::RenderContext &context) {
+          const TargetModels *const targets =
+              context.packet != nullptr
+                  ? context.packet->find_channel<TargetModels>()
+                  : nullptr;
+          if (targets == nullptr)
+            return;
+          usize used = 0;
+          for (const nxe::RenderContext::RenderTarget &target :
+               context.render_targets) {
+            const Frame *const frame = targets->find(target.camera);
+            if (frame == nullptr || frame->empty())
+              continue;
+            ensure_pipelines(ctx, target.format);
+            ModelRenderer *const renderer = target_renderer(ctx, used++);
+            if (renderer != nullptr)
+              renderer->draw(ctx.device(), graph, target.texture, target.format,
+                             context.scene_push.cameras, *frame);
+          }
+        }));
+    // A frame without the slot draws no targets, which is no fault.
+    static constexpr nx::string_view TARGETS[] = {TARGETS_PASS};
+    if (ctx.has_pass_slot(nxe::TARGETS_SLOT) &&
+        !ctx.fill_pass_slot(nxe::TARGETS_SLOT, TARGETS, name()))
+      nx::logw("live2d: the '{}' slot is filled already", nxe::TARGETS_SLOT);
+
     nx::logi("live2d: attached");
     return true;
   }
@@ -168,6 +243,9 @@ public:
   void on_detach(nxe::ModuleContext &ctx) override {
     reset_pipelines(ctx);
     m_renderer.shutdown();
+    for (const nx::unique_ptr<ModelRenderer> &renderer : m_target_renderers)
+      renderer->shutdown();
+    m_target_renderers.clear();
     m_sampler = 0;
   }
 
@@ -192,6 +270,11 @@ private:
     const nxe::rhi::PipelineHandle
         empty[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
     m_renderer.set_pipelines({}, empty, nxe::rhi::Format::Unknown);
+    for (const nx::unique_ptr<ModelRenderer> &renderer : m_target_renderers)
+      renderer->set_pipelines({}, empty, nxe::rhi::Format::Unknown);
+    m_mask_pipeline = {};
+    for (nxe::rhi::PipelineHandle &model : m_model_pipelines)
+      model = {};
     if (m_mask_request.valid())
       (void)ctx.release_pipeline_load(m_mask_request);
     m_mask_request = {};
@@ -244,9 +327,42 @@ private:
         return;
     }
     m_renderer.set_pipelines(mask, models, format);
+    m_mask_pipeline = mask;
+    for (usize i = 0; i < nx::array_size(models); ++i)
+      m_model_pipelines[i] = models[i];
+    for (const nx::unique_ptr<ModelRenderer> &renderer : m_target_renderers)
+      if (!renderer->ready())
+        renderer->set_pipelines(mask, models, format);
+  }
+
+  /// The renderer for the @p index th target drawn this frame: each its own,
+  /// since one draws once a frame into one target.
+  [[nodiscard]] ModelRenderer *target_renderer(nxe::ModuleContext &ctx,
+                                               const usize index) {
+    if (index >= nxe::MAX_RENDER_TARGETS)
+      return nullptr;
+    while (m_target_renderers.size() <= index) {
+      nx::unique_ptr<ModelRenderer> renderer = nx::make_unique<ModelRenderer>();
+      if (!renderer->init(ctx.device(), m_sampler))
+        return nullptr;
+      renderer->set_name(
+          nx::format("live2d.target.{}", m_target_renderers.size()).view());
+      renderer->set_atlas_limit(m_atlas_limit);
+      if (m_mask_pipeline.valid())
+        renderer->set_pipelines(m_mask_pipeline, m_model_pipelines,
+                                m_pipeline_format);
+      m_target_renderers.push_back(std::move(renderer));
+    }
+    return m_target_renderers[index].get();
   }
 
   ModelRenderer m_renderer;
+  /// One for each target drawn at once, made as more are.
+  nx::vector<nx::unique_ptr<ModelRenderer>> m_target_renderers;
+  nxe::rhi::PipelineHandle m_mask_pipeline;
+  nxe::rhi::PipelineHandle
+      m_model_pipelines[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
+  u32 m_atlas_limit = DEFAULT_ATLAS_LIMIT;
   Live2DSystem m_system;
   /// Lets go of texture pages no model uses any more, once a model has come
   /// or gone: a companion switched out must not keep its pages resident.

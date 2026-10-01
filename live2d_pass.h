@@ -5,6 +5,8 @@
 #include "rendering/rhi/descs.h"
 #include "rendering/rhi/upload_ring.h"
 
+#include "core/foundation/strings/utf8_string.h"
+
 #include <glm/vec2.hpp>
 
 #include <span>
@@ -146,6 +148,8 @@ public:
   [[nodiscard]] usize cached_meshes() const noexcept { return m_meshes.size(); }
 
   void set_atlas_limit(u32 limit) noexcept;
+  /// What its graph passes are called, so two renderers' never share names.
+  void set_name(nx::string_view name) { m_name = nx::string(name); }
 
   void draw(nxe::rhi::Device &device, nxe::rg::RenderGraph &graph,
             nxe::rg::TextureId target, nxe::rhi::Format format, u64 cameras,
@@ -186,6 +190,7 @@ private:
   nxe::rhi::Format m_format = nxe::rhi::Format::Unknown;
   u32 m_sampler = 0;
   u32 m_atlas_limit = DEFAULT_ATLAS_LIMIT;
+  nx::string m_name{"live2d"};
 };
 
 } // namespace nxm::live2d

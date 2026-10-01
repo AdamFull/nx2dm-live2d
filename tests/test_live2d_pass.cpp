@@ -366,6 +366,66 @@ TEST_CASE("live2d: the renderer records every mask atlas") {
   device.destroy_shader(shader);
 }
 
+TEST_CASE("live2d: renderers named apart draw one frame into two targets") {
+  TestDevice fixture;
+  if (!fixture.ready)
+    SKIP("no usable RHI device");
+  rhi::Device &device = fixture.device;
+
+  const rhi::ShaderHandle shader = load_live2d_shader(device);
+  if (!shader.valid())
+    SKIP("the module's shaders are not built in this configuration");
+
+  TestPipelines pipelines;
+  REQUIRE(pipelines.init(device, shader, rhi::Format::RGBA8_UNORM));
+  ModelRenderer window;
+  ModelRenderer preview;
+  REQUIRE(window.init(device, 0));
+  REQUIRE(preview.init(device, 0));
+  preview.set_name("live2d.target.0");
+  for (ModelRenderer *const renderer : {&window, &preview})
+    renderer->set_pipelines(pipelines.mask, pipelines.models,
+                            rhi::Format::RGBA8_UNORM);
+
+  Frame frame;
+  const u32 model = add_boxes(frame, {{{-0.5f, -0.5f}, {0.5f, 0.5f}}});
+  frame.draws.push_back(
+      {.model = model, .drawable = 0, .clip = {.group = 0, .atlas = 0}});
+  frame.masks.push_back({.model = model, .drawable = 0, .atlas = 0});
+  frame.atlas_sizes = {64};
+
+  upload_meshes(device, window, frame);
+  upload_meshes(device, preview, frame);
+  rg::RenderGraph graph;
+  REQUIRE(graph.init(&device));
+  graph.begin_frame();
+  const auto target = [&](const char *name) {
+    return graph.create({
+        .name = name,
+        .format = rhi::Format::RGBA8_UNORM,
+        .width = TARGET,
+        .height = TARGET,
+        .usage = rhi::TextureUsage::RenderTarget,
+    });
+  };
+  window.draw(device, graph, target("window"), rhi::Format::RGBA8_UNORM, 0,
+              frame);
+  preview.draw(device, graph, target("preview"), rhi::Format::RGBA8_UNORM, 0,
+               frame);
+
+  REQUIRE(graph.pass_count() == 4u);
+  CHECK(graph.pass_name(0) == "live2d.masks.0");
+  CHECK(graph.pass_name(1) == "live2d.model");
+  CHECK(graph.pass_name(2) == "live2d.target.0.masks.0");
+  CHECK(graph.pass_name(3) == "live2d.target.0.model");
+
+  graph.shutdown();
+  preview.shutdown();
+  window.shutdown();
+  pipelines.shutdown(device);
+  device.destroy_shader(shader);
+}
+
 TEST_CASE("live2d: the draw stream groups masks by atlas after the model") {
   Frame frame;
   const u32 model = add_boxes(frame, {{{0.f, 0.f}, {1.f, 1.f}},

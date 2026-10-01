@@ -97,6 +97,22 @@ TEST_CASE("live2d: attaching wires the systems, the pass and the slot") {
   CHECK(scene < model);
   if (ui != ~usize{0})
     CHECK(model < ui);
+
+  // Into the textures cameras draw into, after they are cleared and before
+  // the UI shows them.
+  CHECK(h.engine->passes().defined("live2d.targets"));
+  usize cleared = ~usize{0};
+  usize targets = ~usize{0};
+  for (usize i = 0; i < order.size(); ++i) {
+    if (order[i] == "core.targets")
+      cleared = i;
+    if (order[i] == "live2d.targets")
+      targets = i;
+  }
+  REQUIRE(targets != ~usize{0});
+  CHECK(cleared < targets);
+  if (ui != ~usize{0})
+    CHECK(targets < ui);
 }
 
 TEST_CASE("live2d: its emit runs beside the other declared Present systems") {
