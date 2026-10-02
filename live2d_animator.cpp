@@ -106,6 +106,11 @@ void Animator::set_look(const f32 x, const f32 y, const bool eased) noexcept {
   }
 }
 
+void Animator::set_lean(const f32 x, const f32 y) noexcept {
+  m_lean_x = nx::clamp(x, -1.f, 1.f);
+  m_lean_y = nx::clamp(y, -1.f, 1.f);
+}
+
 void Animator::update(const f32 dt) {
   Exposed *const owner = reach(m_asset);
   if (owner == nullptr)
@@ -163,6 +168,16 @@ void Animator::update(const f32 dt) {
                              m_look_x * 10.f);
     model->AddParameterValue(ids->GetId(id::ParamEyeBallX), m_look_x);
     model->AddParameterValue(ids->GetId(id::ParamEyeBallY), m_look_y);
+  }
+  if (m_lean_x != 0.f || m_lean_y != 0.f) {
+    csm::CubismIdManager *const ids = csm::CubismFramework::GetIdManager();
+    namespace id = csm::DefaultParameterId;
+    model->AddParameterValue(ids->GetId(id::ParamAngleX), m_lean_x * 15.f);
+    model->AddParameterValue(ids->GetId(id::ParamAngleY), m_lean_y * 20.f);
+    model->AddParameterValue(ids->GetId(id::ParamAngleZ), m_lean_x * 15.f);
+    model->AddParameterValue(ids->GetId(id::ParamBodyAngleX), m_lean_x * 10.f);
+    model->AddParameterValue(ids->GetId(id::ParamBodyAngleY), m_lean_y * 10.f);
+    model->AddParameterValue(ids->GetId(id::ParamBodyAngleZ), m_lean_x * 10.f);
   }
   if (m_breathing && owner->_breath != nullptr)
     owner->_breath->UpdateParameters(model, dt);

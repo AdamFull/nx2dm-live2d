@@ -17,6 +17,10 @@
       "signature": "(number,number,number)->(boolean)"
     },
     {
+      "name": "live2d_lean",
+      "signature": "(number,number,number)->(boolean)"
+    },
+    {
       "name": "live2d_finished",
       "signature": "(number)->(boolean)"
     },

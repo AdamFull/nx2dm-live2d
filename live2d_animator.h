@@ -51,6 +51,10 @@ public:
   /// it turns its head, body and eyes there over LOOK_SECONDS. @p eased
   /// false turns it there at once.
   void set_look(f32 x, f32 y, bool eased = true) noexcept;
+  /// How far the model leans, from -1 to 1 across and up, on top of where
+  /// it looks: head and body tilted and turned that way, at once. A game
+  /// moves it frame by frame, as for a sway.
+  void set_lean(f32 x, f32 y) noexcept;
   [[nodiscard]] f32 look_x() const noexcept { return m_look_x; }
   [[nodiscard]] f32 look_y() const noexcept { return m_look_y; }
   [[nodiscard]] f32 mouth() const noexcept { return m_mouth; }
@@ -84,6 +88,8 @@ private:
   f32 m_look_y = 0.f;
   f32 m_look_target_x = 0.f;
   f32 m_look_target_y = 0.f;
+  f32 m_lean_x = 0.f;
+  f32 m_lean_y = 0.f;
   bool m_blinking = false;
   bool m_breathing = false;
 };

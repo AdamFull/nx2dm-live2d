@@ -265,6 +265,41 @@ TEST_CASE("live2d: the model turns its head, body and eyes to where it is "
   CHECK(animator.parameter("ParamAngleY") == nxtest::Approx(0.f).margin(0.05f));
 }
 
+TEST_CASE("live2d: the model leans at once, on top of where it looks") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  ModelAsset asset;
+  nx::string error;
+  REQUIRE(load_model(MODEL, {}, asset, error));
+  Animator animator(asset);
+  animator.update(1.f / 60.f);
+  CHECK(animator.parameter("ParamBodyAngleZ") ==
+        nxtest::Approx(0.f).margin(0.01f));
+
+  animator.set_lean(1.f, -0.5f);
+  animator.update(1.f / 60.f);
+  CHECK(animator.parameter("ParamBodyAngleX") == nxtest::Approx(10.f));
+  CHECK(animator.parameter("ParamBodyAngleZ") == nxtest::Approx(10.f));
+  CHECK(animator.parameter("ParamAngleZ") == nxtest::Approx(15.f));
+  CHECK(animator.parameter("ParamAngleY") == nxtest::Approx(-10.f));
+
+  // Added to the look, and the edge for more than 1.
+  animator.set_look(1.f, 0.f, false);
+  animator.set_lean(-4.f, 0.f);
+  animator.update(1.f / 60.f);
+  CHECK(animator.parameter("ParamBodyAngleX") ==
+        nxtest::Approx(0.f).margin(0.01f));
+  CHECK(animator.parameter("ParamAngleX") == nxtest::Approx(15.f));
+
+  animator.set_look(0.f, 0.f, false);
+  animator.set_lean(0.f, 0.f);
+  animator.update(1.f / 60.f);
+  CHECK(animator.parameter("ParamAngleZ") ==
+        nxtest::Approx(0.f).margin(0.01f));
+}
+
 TEST_CASE("live2d: a shared moc outlives each model and goes with the last") {
   REQUIRE_BUNDLED();
   Mounted mount;
