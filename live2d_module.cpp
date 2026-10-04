@@ -25,6 +25,7 @@ constexpr nx::string_view EMIT_SYSTEM = "live2d.emit";
 constexpr nx::string_view MODULE_SLOT = "live2d";
 constexpr nx::string_view WORLD_SLOT = "world";
 constexpr nx::string_view SHADER = "live2d/live2d";
+
 constexpr nxe::ModuleService PROVIDED_SERVICES[] = {
     {.id = SERVICE, .version = {1, 0, 0}},
 };
@@ -85,7 +86,6 @@ public:
                                               u64{4} << 20, u64{32} << 20)
                                   : u64{16} << 20;
     m_system.set_mask_limits(max_mask_resolution, memory_budget);
-    m_renderer.set_atlas_limit(max_mask_resolution);
     m_atlas_limit = max_mask_resolution;
     m_system.set_threads(&ctx.threads());
     if (nx::vfs::AsyncIoService *const io = ctx.async_io())
@@ -124,8 +124,6 @@ public:
 
   bool on_attach(nxe::ModuleContext &ctx) override {
     m_sampler = ctx.samplers().index(nxe::scene::sampler_bilinear());
-    if (!m_renderer.init(ctx.device(), m_sampler))
-      nx::logw("live2d: no upload ring; models will not draw");
 
     ctx.schedule().define(
         LOAD_SYSTEM,
@@ -184,8 +182,9 @@ public:
                  const nxe::scene::RenderLayers>(EMIT_SYSTEM);
 
     ctx.passes().define(
-        DRAW_PASS, nxe::PassFn([this, &ctx](nxe::rg::RenderGraph &graph,
-                                            nxe::RenderContext &context) {
+        DRAW_PASS,
+        nxe::PassFn([this, &ctx](nxe::rg::RenderGraph &graph,
+                                 nxe::RenderContext &context) {
           const Frame *const frame = context.packet != nullptr
                                          ? context.packet->find_channel<Frame>()
                                          : nullptr;
@@ -197,10 +196,13 @@ public:
                   ? ctx.device().swapchain_format()
                   : ctx.config().scene_format;
           ensure_pipelines(ctx, format);
-          m_renderer.draw(ctx.device(), graph,
-                          context.target(nxe::TARGET_SCENE_COLOR), format,
-                          context.scene_push.cameras, *frame);
-        }));
+          ModelRenderer *const renderer = world_renderer(ctx, context.node);
+          if (renderer != nullptr)
+            renderer->draw(ctx.device(), graph,
+                           context.target(nxe::TARGET_SCENE_COLOR), format,
+                           context.scene_push.cameras, *frame);
+        }),
+        nxe::PassScope::Node);
 
     static constexpr nx::string_view MINE[] = {DRAW_PASS};
     const nx::string_view slot =
@@ -242,7 +244,9 @@ public:
 
   void on_detach(nxe::ModuleContext &ctx) override {
     reset_pipelines(ctx);
-    m_renderer.shutdown();
+    m_world_renderers.for_each(
+        [](ModelRenderer &renderer) { renderer.shutdown(); });
+    m_world_renderers.clear();
     for (const nx::unique_ptr<ModelRenderer> &renderer : m_target_renderers)
       renderer->shutdown();
     m_target_renderers.clear();
@@ -269,7 +273,9 @@ private:
   void reset_pipelines(nxe::ModuleContext &ctx) {
     const nxe::rhi::PipelineHandle
         empty[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
-    m_renderer.set_pipelines({}, empty, nxe::rhi::Format::Unknown);
+    m_world_renderers.for_each([&](ModelRenderer &renderer) {
+      renderer.set_pipelines({}, empty, nxe::rhi::Format::Unknown);
+    });
     for (const nx::unique_ptr<ModelRenderer> &renderer : m_target_renderers)
       renderer->set_pipelines({}, empty, nxe::rhi::Format::Unknown);
     m_mask_pipeline = {};
@@ -326,13 +332,51 @@ private:
       if (!models[i].valid())
         return;
     }
-    m_renderer.set_pipelines(mask, models, format);
     m_mask_pipeline = mask;
     for (usize i = 0; i < nx::array_size(models); ++i)
       m_model_pipelines[i] = models[i];
+    m_world_renderers.for_each([&](ModelRenderer &renderer) {
+      if (!renderer.ready())
+        renderer.set_pipelines(mask, models, format);
+    });
     for (const nx::unique_ptr<ModelRenderer> &renderer : m_target_renderers)
       if (!renderer->ready())
         renderer->set_pipelines(mask, models, format);
+  }
+
+  [[nodiscard]] nx::unique_ptr<ModelRenderer>
+  make_renderer(nxe::ModuleContext &ctx, const nx::string_view name) {
+    nx::unique_ptr<ModelRenderer> renderer = nx::make_unique<ModelRenderer>();
+    if (!renderer->init(ctx.device(), m_sampler)) {
+      if (!m_ring_warned)
+        nx::logw("live2d: no upload ring for '{}'; models will not draw", name);
+      m_ring_warned = true;
+      return nullptr;
+    }
+    renderer->set_name(name);
+    renderer->set_atlas_limit(m_atlas_limit);
+    if (m_mask_pipeline.valid())
+      renderer->set_pipelines(m_mask_pipeline, m_model_pipelines,
+                              m_pipeline_format);
+    return renderer;
+  }
+
+  [[nodiscard]] ModelRenderer *world_renderer(nxe::ModuleContext &ctx,
+                                              const nxe::ComposedNode *node) {
+    const nx::string_view name =
+        node != nullptr ? node->name.view() : nx::string_view{};
+    ModelRenderer *const renderer = m_world_renderers.renderer(
+        name, [&](const nx::string_view renderer_name) {
+          return make_renderer(ctx, renderer_name);
+        });
+    if (renderer == nullptr &&
+        m_world_renderers.size() == NodeRenderers::MAX_NODES &&
+        !m_nodes_warned) {
+      nx::logw("live2d: models draw in at most {} nodes; '{}' is not one",
+               NodeRenderers::MAX_NODES, name);
+      m_nodes_warned = true;
+    }
+    return renderer;
   }
 
   /// The renderer for the @p index th target drawn this frame: each its own,
@@ -342,21 +386,19 @@ private:
     if (index >= nxe::MAX_RENDER_TARGETS)
       return nullptr;
     while (m_target_renderers.size() <= index) {
-      nx::unique_ptr<ModelRenderer> renderer = nx::make_unique<ModelRenderer>();
-      if (!renderer->init(ctx.device(), m_sampler))
-        return nullptr;
-      renderer->set_name(
+      nx::unique_ptr<ModelRenderer> renderer = make_renderer(
+          ctx,
           nx::format("live2d.target.{}", m_target_renderers.size()).view());
-      renderer->set_atlas_limit(m_atlas_limit);
-      if (m_mask_pipeline.valid())
-        renderer->set_pipelines(m_mask_pipeline, m_model_pipelines,
-                                m_pipeline_format);
+      if (renderer == nullptr)
+        return nullptr;
       m_target_renderers.push_back(std::move(renderer));
     }
     return m_target_renderers[index].get();
   }
 
-  ModelRenderer m_renderer;
+  NodeRenderers m_world_renderers;
+  bool m_nodes_warned = false;
+  bool m_ring_warned = false;
   /// One for each target drawn at once, made as more are.
   nx::vector<nx::unique_ptr<ModelRenderer>> m_target_renderers;
   nxe::rhi::PipelineHandle m_mask_pipeline;

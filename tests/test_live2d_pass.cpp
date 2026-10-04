@@ -426,6 +426,41 @@ TEST_CASE("live2d: renderers named apart draw one frame into two targets") {
   device.destroy_shader(shader);
 }
 
+TEST_CASE("live2d: each node the world pass draws for has a renderer of its "
+          "own") {
+  NodeRenderers renderers;
+  nx::vector<nx::string> made;
+  const auto make = [&made](const nx::string_view name) {
+    made.push_back(nx::string(name));
+    return nx::make_unique<ModelRenderer>();
+  };
+
+  ModelRenderer *const window = renderers.renderer("", make);
+  ModelRenderer *const world = renderers.renderer("world", make);
+  ModelRenderer *const preview = renderers.renderer("preview", make);
+  REQUIRE(window != nullptr);
+  REQUIRE(world != nullptr);
+  REQUIRE(preview != nullptr);
+  CHECK(window != world);
+  CHECK(world != preview);
+  CHECK(renderers.renderer("world", make) == world);
+  CHECK(renderers.renderer("", make) == window);
+  const nx::vector<nx::string> names = {"live2d", "live2d.world",
+                                        "live2d.preview"};
+  CHECK(made == names);
+
+  for (usize i = renderers.size(); i < NodeRenderers::MAX_NODES; ++i)
+    CHECK(renderers.renderer(nx::format("n{}", i).view(), make) != nullptr);
+  CHECK(renderers.renderer("one too many", make) == nullptr);
+  CHECK(renderers.renderer("world", make) == world);
+
+  NodeRenderers failing;
+  CHECK(failing.renderer("world", [](nx::string_view) {
+    return nx::unique_ptr<ModelRenderer>{};
+  }) == nullptr);
+  CHECK(failing.size() == 0u);
+}
+
 TEST_CASE("live2d: the draw stream groups masks by atlas after the model") {
   Frame frame;
   const u32 model = add_boxes(frame, {{{0.f, 0.f}, {1.f, 1.f}},

@@ -5,6 +5,7 @@
 #include "rendering/rhi/descs.h"
 #include "rendering/rhi/upload_ring.h"
 
+#include "core/foundation/core/callable.h"
 #include "core/foundation/strings/utf8_string.h"
 
 #include <glm/vec2.hpp>
@@ -191,6 +192,34 @@ private:
   u32 m_sampler = 0;
   u32 m_atlas_limit = DEFAULT_ATLAS_LIMIT;
   nx::string m_name{"live2d"};
+};
+
+/// A renderer for each composition node the world pass draws for: one draws
+/// once a frame, and a pipeline may serve several nodes.
+class NodeRenderers {
+public:
+  static constexpr usize MAX_NODES = 8;
+  using Make =
+      nx::function_ref<nx::unique_ptr<ModelRenderer>(nx::string_view name)>;
+
+  /// @p node's renderer (empty for the window's root), made by @p make under
+  /// "live2d" or "live2d.<node>" the first time it draws; null past MAX_NODES
+  /// or when making fails.
+  [[nodiscard]] ModelRenderer *renderer(nx::string_view node, Make make);
+  [[nodiscard]] usize size() const noexcept { return m_entries.size(); }
+
+  template <class Fn> void for_each(Fn &&fn) {
+    for (const Entry &entry : m_entries)
+      fn(*entry.renderer);
+  }
+  void clear() noexcept { m_entries.clear(); }
+
+private:
+  struct Entry {
+    nx::string node;
+    nx::unique_ptr<ModelRenderer> renderer;
+  };
+  nx::vector<Entry> m_entries;
 };
 
 } // namespace nxm::live2d

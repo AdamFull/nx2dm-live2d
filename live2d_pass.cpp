@@ -477,4 +477,20 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
       }));
 }
 
+ModelRenderer *NodeRenderers::renderer(const nx::string_view node,
+                                       const Make make) {
+  for (const Entry &entry : m_entries)
+    if (entry.node == node)
+      return entry.renderer.get();
+  if (m_entries.size() == MAX_NODES)
+    return nullptr;
+  nx::unique_ptr<ModelRenderer> made =
+      make(node.empty() ? nx::string("live2d").view()
+                        : nx::format("live2d.{}", node).view());
+  if (made == nullptr)
+    return nullptr;
+  m_entries.push_back({nx::string(node), std::move(made)});
+  return m_entries.back().renderer.get();
+}
+
 } // namespace nxm::live2d

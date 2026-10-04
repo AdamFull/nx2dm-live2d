@@ -177,3 +177,17 @@ TEST_CASE("live2d: a frame with no model costs the module nothing") {
   h.engine->on_tick(h.platform, 1.0 / 60.0);
   CHECK(h.engine->frame_index() == 1u);
 }
+
+TEST_CASE("live2d: its world pass draws for every node, its targets pass "
+          "once a frame") {
+  Harness h;
+  if (!h.ready)
+    SKIP("no usable RHI device");
+
+  const nx::string_view twice[] = {"live2d.draw", "live2d.targets",
+                                   "live2d.draw", "live2d.targets"};
+  h.engine->passes().order(twice);
+  const nx::vector<nx::string> repeated = h.engine->passes().repeated();
+  REQUIRE(repeated.size() == 1u);
+  CHECK(repeated[0] == "live2d.targets");
+}
