@@ -211,27 +211,27 @@ public:
       nx::logw("live2d: nothing to fill; the frame has no '{}' slot", slot);
 
     ctx.passes().define(
-        TARGETS_PASS, nxe::PassFn([this, &ctx](nxe::rg::RenderGraph &graph,
-                                               nxe::RenderContext &context) {
+        TARGETS_PASS,
+        nxe::PassFn([this, &ctx](nxe::rg::RenderGraph &graph,
+                                 nxe::RenderContext &context) {
           const TargetModels *const targets =
               context.packet != nullptr
                   ? context.packet->find_channel<TargetModels>()
                   : nullptr;
           if (targets == nullptr)
             return;
-          usize used = 0;
-          for (const nxe::RenderContext::RenderTarget &target :
-               context.render_targets) {
-            const Frame *const frame = targets->find(target.camera);
-            if (frame == nullptr || frame->empty())
-              continue;
-            ensure_pipelines(ctx, target.format);
-            ModelRenderer *const renderer = target_renderer(ctx, used++);
-            if (renderer != nullptr)
-              renderer->draw(ctx.device(), graph, target.texture, target.format,
-                             context.scene_push.cameras, *frame);
-          }
-        }));
+          const Frame *const frame = targets->find(context.view.camera);
+          if (frame == nullptr || frame->empty())
+            return;
+          ensure_pipelines(ctx, context.view.format);
+          ModelRenderer *const renderer =
+              target_renderer(ctx, context.view.target);
+          if (renderer != nullptr)
+            renderer->draw(
+                ctx.device(), graph, context.target(nxe::TARGET_BACKBUFFER),
+                context.view.format, context.scene_push.cameras, *frame);
+        }),
+        nxe::PassScope::Node);
     // A frame without the slot draws no targets, which is no fault.
     static constexpr nx::string_view TARGETS[] = {TARGETS_PASS};
     if (ctx.has_pass_slot(nxe::TARGETS_SLOT) &&
@@ -247,8 +247,8 @@ public:
     m_world_renderers.for_each(
         [](ModelRenderer &renderer) { renderer.shutdown(); });
     m_world_renderers.clear();
-    for (const nx::unique_ptr<ModelRenderer> &renderer : m_target_renderers)
-      renderer->shutdown();
+    m_target_renderers.for_each(
+        [](ModelRenderer &renderer) { renderer.shutdown(); });
     m_target_renderers.clear();
     m_sampler = 0;
   }
@@ -276,8 +276,9 @@ private:
     m_world_renderers.for_each([&](ModelRenderer &renderer) {
       renderer.set_pipelines({}, empty, nxe::rhi::Format::Unknown);
     });
-    for (const nx::unique_ptr<ModelRenderer> &renderer : m_target_renderers)
-      renderer->set_pipelines({}, empty, nxe::rhi::Format::Unknown);
+    m_target_renderers.for_each([&](ModelRenderer &renderer) {
+      renderer.set_pipelines({}, empty, nxe::rhi::Format::Unknown);
+    });
     m_mask_pipeline = {};
     for (nxe::rhi::PipelineHandle &model : m_model_pipelines)
       model = {};
@@ -339,9 +340,10 @@ private:
       if (!renderer.ready())
         renderer.set_pipelines(mask, models, format);
     });
-    for (const nx::unique_ptr<ModelRenderer> &renderer : m_target_renderers)
-      if (!renderer->ready())
-        renderer->set_pipelines(mask, models, format);
+    m_target_renderers.for_each([&](ModelRenderer &renderer) {
+      if (!renderer.ready())
+        renderer.set_pipelines(mask, models, format);
+    });
   }
 
   [[nodiscard]] nx::unique_ptr<ModelRenderer>
@@ -379,28 +381,21 @@ private:
     return renderer;
   }
 
-  /// The renderer for the @p index th target drawn this frame: each its own,
-  /// since one draws once a frame into one target.
+  /// The renderer for the camera target @p path: each its own, since one
+  /// draws once a frame into one target.
   [[nodiscard]] ModelRenderer *target_renderer(nxe::ModuleContext &ctx,
-                                               const usize index) {
-    if (index >= nxe::MAX_RENDER_TARGETS)
-      return nullptr;
-    while (m_target_renderers.size() <= index) {
-      nx::unique_ptr<ModelRenderer> renderer = make_renderer(
-          ctx,
-          nx::format("live2d.target.{}", m_target_renderers.size()).view());
-      if (renderer == nullptr)
-        return nullptr;
-      m_target_renderers.push_back(std::move(renderer));
-    }
-    return m_target_renderers[index].get();
+                                               const nx::string_view path) {
+    return m_target_renderers.renderer(
+        path, [&](const nx::string_view renderer_name) {
+          return make_renderer(ctx, renderer_name);
+        });
   }
 
   NodeRenderers m_world_renderers;
   bool m_nodes_warned = false;
   bool m_ring_warned = false;
-  /// One for each target drawn at once, made as more are.
-  nx::vector<nx::unique_ptr<ModelRenderer>> m_target_renderers;
+  /// One for each camera target drawn, by its path.
+  NodeRenderers m_target_renderers;
   nxe::rhi::PipelineHandle m_mask_pipeline;
   nxe::rhi::PipelineHandle
       m_model_pipelines[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};

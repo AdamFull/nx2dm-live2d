@@ -98,21 +98,22 @@ TEST_CASE("live2d: attaching wires the systems, the pass and the slot") {
   if (ui != ~usize{0})
     CHECK(model < ui);
 
-  // Into the textures cameras draw into, after they are cleared and before
-  // the UI shows them.
+  // Into the textures cameras draw into, through the offscreen node they
+  // bind, recorded before the UI shows them.
   CHECK(h.engine->passes().defined("live2d.targets"));
-  usize cleared = ~usize{0};
-  usize targets = ~usize{0};
-  for (usize i = 0; i < order.size(); ++i) {
-    if (order[i] == "core.targets")
-      cleared = i;
-    if (order[i] == "live2d.targets")
-      targets = i;
-  }
-  REQUIRE(targets != ~usize{0});
-  CHECK(cleared < targets);
+  usize offscreen = ~usize{0};
+  for (usize i = 0; i < order.size(); ++i)
+    if (order[i] == nxe::PASS_OFFSCREEN)
+      offscreen = i;
+  REQUIRE(offscreen != ~usize{0});
   if (ui != ~usize{0})
-    CHECK(targets < ui);
+    CHECK(offscreen < ui);
+  const std::span<const nx::string> cameras =
+      h.engine->passes().offscreen_ordered("");
+  bool targets = false;
+  for (const nx::string &pass : cameras)
+    targets = targets || pass == "live2d.targets";
+  CHECK(targets);
 }
 
 TEST_CASE("live2d: its emit runs beside the other declared Present systems") {
@@ -178,8 +179,7 @@ TEST_CASE("live2d: a frame with no model costs the module nothing") {
   CHECK(h.engine->frame_index() == 1u);
 }
 
-TEST_CASE("live2d: its world pass draws for every node, its targets pass "
-          "once a frame") {
+TEST_CASE("live2d: its world and targets passes draw for every node") {
   Harness h;
   if (!h.ready)
     SKIP("no usable RHI device");
@@ -187,7 +187,5 @@ TEST_CASE("live2d: its world pass draws for every node, its targets pass "
   const nx::string_view twice[] = {"live2d.draw", "live2d.targets",
                                    "live2d.draw", "live2d.targets"};
   h.engine->passes().order(twice);
-  const nx::vector<nx::string> repeated = h.engine->passes().repeated();
-  REQUIRE(repeated.size() == 1u);
-  CHECK(repeated[0] == "live2d.targets");
+  CHECK(h.engine->passes().repeated().empty());
 }
