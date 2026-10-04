@@ -189,3 +189,23 @@ TEST_CASE("live2d: its world and targets passes draw for every node") {
   h.engine->passes().order(twice);
   CHECK(h.engine->passes().repeated().empty());
 }
+
+TEST_CASE("live2d: its passes draw only where there is a camera") {
+  Harness h;
+  if (!h.ready)
+    SKIP("no usable RHI device");
+
+  const ComposedNode nodes[] = {{.name = "world"},
+                                {.name = "post", .kind = FrameNodeKind::Group}};
+  const FramePasses::OrderedPass order[] = {{"live2d.draw", 0},
+                                            {"live2d.targets", 0},
+                                            {"live2d.draw", 1},
+                                            {"live2d.targets", 1}};
+  h.engine->passes().order_from_frame(order, nodes);
+  const nx::vector<nx::string> unmet = h.engine->passes().unmet();
+  REQUIRE(unmet.size() == 2u);
+  CHECK(unmet[0].view().starts_with("'live2d.draw' needs view, which node "
+                                    "'post'"));
+  CHECK(unmet[1].view().starts_with("'live2d.targets' needs view, which node "
+                                    "'post'"));
+}

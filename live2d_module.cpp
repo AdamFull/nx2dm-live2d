@@ -6,6 +6,7 @@
 #include "app/assets/async_texture_set.h"
 #include "app/engine.h"
 #include "app/module_system/module.h"
+#include "app/rendering/gpu_pipelines.h"
 #include "rendering/render2d/frame_packet.h"
 #include "scene/scene_json.h"
 
@@ -191,18 +192,18 @@ public:
           if (frame == nullptr || frame->empty())
             return;
 
-          const nxe::rhi::Format format =
-              ctx.config().scene_format == nxe::rhi::Format::Unknown
-                  ? ctx.device().swapchain_format()
-                  : ctx.config().scene_format;
-          ensure_pipelines(ctx, format);
+          const nxe::rg::TextureId target =
+              context.target(nxe::TARGET_SCENE_COLOR);
+          const nxe::rhi::Format format = graph.format(target);
           ModelRenderer *const renderer = world_renderer(ctx, context.node);
-          if (renderer != nullptr)
-            renderer->draw(ctx.device(), graph,
-                           context.target(nxe::TARGET_SCENE_COLOR), format,
-                           context.scene_push.cameras, *frame);
+          if (renderer == nullptr)
+            return;
+          use_pipelines(ctx, *renderer, format);
+          renderer->draw(ctx.device(), graph, target, format,
+                         context.scene_push.cameras, *frame);
         }),
-        nxe::PassScope::Node);
+        nxe::PassTraits{.scope = nxe::PassScope::Node,
+                        .needs = nxe::PassNeed::View});
 
     static constexpr nx::string_view MINE[] = {DRAW_PASS};
     const nx::string_view slot =
@@ -223,15 +224,19 @@ public:
           const Frame *const frame = targets->find(context.view.camera);
           if (frame == nullptr || frame->empty())
             return;
-          ensure_pipelines(ctx, context.view.format);
+          const nxe::rg::TextureId target =
+              context.target(nxe::TARGET_BACKBUFFER);
+          const nxe::rhi::Format format = graph.format(target);
           ModelRenderer *const renderer =
               target_renderer(ctx, context.view.target);
-          if (renderer != nullptr)
-            renderer->draw(
-                ctx.device(), graph, context.target(nxe::TARGET_BACKBUFFER),
-                context.view.format, context.scene_push.cameras, *frame);
+          if (renderer == nullptr)
+            return;
+          use_pipelines(ctx, *renderer, format);
+          renderer->draw(ctx.device(), graph, target, format,
+                         context.scene_push.cameras, *frame);
         }),
-        nxe::PassScope::Node);
+        nxe::PassTraits{.scope = nxe::PassScope::Node,
+                        .needs = nxe::PassNeed::View});
     // A frame without the slot draws no targets, which is no fault.
     static constexpr nx::string_view TARGETS[] = {TARGETS_PASS};
     if (ctx.has_pass_slot(nxe::TARGETS_SLOT) &&
@@ -279,25 +284,20 @@ private:
     m_target_renderers.for_each([&](ModelRenderer &renderer) {
       renderer.set_pipelines({}, empty, nxe::rhi::Format::Unknown);
     });
-    m_mask_pipeline = {};
-    for (nxe::rhi::PipelineHandle &model : m_model_pipelines)
-      model = {};
     if (m_mask_request.valid())
       (void)ctx.release_pipeline_load(m_mask_request);
     m_mask_request = {};
-    for (nxe::PipelineLoadRequest &request : m_model_requests) {
-      if (request.valid())
+    for (nxe::FormatPipelines &blend : m_model_pipelines)
+      blend.release([&ctx](const nxe::PipelineLoadRequest request) {
         (void)ctx.release_pipeline_load(request);
-      request = {};
-    }
-    m_pipeline_format = nxe::rhi::Format::Unknown;
+      });
   }
 
-  void ensure_pipelines(nxe::ModuleContext &ctx,
-                        const nxe::rhi::Format format) {
-    if (m_pipeline_format != format)
-      reset_pipelines(ctx);
-    m_pipeline_format = format;
+  /// Gives @p renderer the pipelines for a target of @p format once they have
+  /// all compiled; until then it keeps what it had, and draws nothing into a
+  /// target of another format.
+  void use_pipelines(nxe::ModuleContext &ctx, ModelRenderer &renderer,
+                     const nxe::rhi::Format format) {
     if (!m_mask_request.valid()) {
       nxe::rhi::GraphicsPipelineDesc desc;
       desc.name = "live2d mask";
@@ -309,41 +309,29 @@ private:
                        .mode = nxe::rhi::BlendMode::PremultipliedAdditive};
       m_mask_request = ctx.load_graphics_pipeline_async(SHADER, desc);
     }
-    for (usize i = 0; i < nx::array_size(m_model_requests); ++i) {
-      if (m_model_requests[i].valid())
-        continue;
-      nxe::rhi::GraphicsPipelineDesc desc;
-      desc.name = "live2d model";
-      desc.vertex.entry_point = "model_vs";
-      desc.fragment.entry_point = "model_fs";
-      desc.color_formats[0] = format;
-      desc.color_count = 1;
-      desc.blend[0] = {.enabled = true,
-                       .mode =
-                           pipeline_blend(nx::cast<nxe::r2d::MeshBlend>(i))};
-      m_model_requests[i] = ctx.load_graphics_pipeline_async(SHADER, desc);
-    }
     const nxe::rhi::PipelineHandle mask = ctx.loaded_pipeline(m_mask_request);
     nxe::rhi::PipelineHandle
         models[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
-    if (!mask.valid())
-      return;
+    bool compiled = mask.valid();
     for (usize i = 0; i < nx::array_size(models); ++i) {
-      models[i] = ctx.loaded_pipeline(m_model_requests[i]);
-      if (!models[i].valid())
-        return;
+      const nxe::PipelineLoadRequest request = m_model_pipelines[i].request(
+          format, 1u, [&](const nxe::rhi::Format color, u32) {
+            nxe::rhi::GraphicsPipelineDesc desc;
+            desc.name = "live2d model";
+            desc.vertex.entry_point = "model_vs";
+            desc.fragment.entry_point = "model_fs";
+            desc.color_formats[0] = color;
+            desc.color_count = 1;
+            desc.blend[0] = {
+                .enabled = true,
+                .mode = pipeline_blend(nx::cast<nxe::r2d::MeshBlend>(i))};
+            return ctx.load_graphics_pipeline_async(SHADER, desc);
+          });
+      models[i] = ctx.loaded_pipeline(request);
+      compiled = compiled && models[i].valid();
     }
-    m_mask_pipeline = mask;
-    for (usize i = 0; i < nx::array_size(models); ++i)
-      m_model_pipelines[i] = models[i];
-    m_world_renderers.for_each([&](ModelRenderer &renderer) {
-      if (!renderer.ready())
-        renderer.set_pipelines(mask, models, format);
-    });
-    m_target_renderers.for_each([&](ModelRenderer &renderer) {
-      if (!renderer.ready())
-        renderer.set_pipelines(mask, models, format);
-    });
+    if (compiled)
+      renderer.set_pipelines(mask, models, format);
   }
 
   [[nodiscard]] nx::unique_ptr<ModelRenderer>
@@ -357,9 +345,6 @@ private:
     }
     renderer->set_name(name);
     renderer->set_atlas_limit(m_atlas_limit);
-    if (m_mask_pipeline.valid())
-      renderer->set_pipelines(m_mask_pipeline, m_model_pipelines,
-                              m_pipeline_format);
     return renderer;
   }
 
@@ -396,9 +381,6 @@ private:
   bool m_ring_warned = false;
   /// One for each camera target drawn, by its path.
   NodeRenderers m_target_renderers;
-  nxe::rhi::PipelineHandle m_mask_pipeline;
-  nxe::rhi::PipelineHandle
-      m_model_pipelines[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
   u32 m_atlas_limit = DEFAULT_ATLAS_LIMIT;
   Live2DSystem m_system;
   /// Lets go of texture pages no model uses any more, once a model has come
@@ -425,9 +407,9 @@ private:
   nx::vector<nx::string_view> m_in_use;
   usize m_swept_models = 0;
   nxe::PipelineLoadRequest m_mask_request;
-  nxe::PipelineLoadRequest
-      m_model_requests[nx::cast<usize>(nxe::r2d::MeshBlend::Count)] = {};
-  nxe::rhi::Format m_pipeline_format = nxe::rhi::Format::Unknown;
+  /// By blend, for each format a model has drawn into.
+  nxe::FormatPipelines
+      m_model_pipelines[nx::cast<usize>(nxe::r2d::MeshBlend::Count)];
   u32 m_sampler = 0;
 };
 
