@@ -6,7 +6,7 @@
 #include "rendering/rhi/shaders/nx_interop.h"
 
 #ifdef __cplusplus
-#include "rendering/render2d/scene_interop.h"
+#include "rendering/interop/2d/scene.h"
 #endif
 
 NX_CONST(uint, NX_L2D_MASK_ATLASES, 16u);

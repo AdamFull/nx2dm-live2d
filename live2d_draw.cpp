@@ -2,7 +2,7 @@
 
 #include "core/foundation/containers/small_vector.h"
 #include "core/foundation/diagnostics/log.h"
-#include "rendering/render2d/scene_interop.h"
+#include "rendering/interop/2d/scene.h"
 #include "rendering/render2d/scene_renderer.h"
 
 #include <Model/CubismModel.hpp>

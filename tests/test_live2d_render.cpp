@@ -220,13 +220,13 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
     stream.build({channel.draws.data(), channel.draws.size()});
     const rhi::BufferHandle records =
         upload("live2d draws", stream.records.data(),
-               nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw));
+               nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw2D));
     const rhi::BufferHandle commands =
         upload("live2d draw commands", stream.commands.data(),
                nx::cast<u64>(stream.commands.size()) *
                    sizeof(rhi::DrawIndirectCommand));
 
-    GpuMeshPush push;
+    GpuMesh2DPush push;
     push.cameras = {device.buffer_address(cameras)};
     push.vertices = {device.buffer_address(vertices)};
     push.indices = {device.buffer_address(indices)};
@@ -409,17 +409,17 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
   stream.build({channel.draws.data(), channel.draws.size()});
   const rhi::BufferHandle textured =
       upload("live2d draws", stream.records.data(),
-             nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw));
-  for (GpuMeshDraw &record : stream.records)
+             nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw2D));
+  for (GpuMeshDraw2D &record : stream.records)
     record.texture = NxTexture2D<float4>::none();
   const rhi::BufferHandle untextured =
       upload("live2d silhouette draws", stream.records.data(),
-             nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw));
+             nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw2D));
   const rhi::BufferHandle commands = upload(
       "live2d draw commands", stream.commands.data(),
       nx::cast<u64>(stream.commands.size()) * sizeof(rhi::DrawIndirectCommand));
 
-  GpuMeshPush push;
+  GpuMesh2DPush push;
   push.cameras = {device.buffer_address(cameras)};
   push.vertices = {device.buffer_address(vertices)};
   push.indices = {device.buffer_address(indices)};

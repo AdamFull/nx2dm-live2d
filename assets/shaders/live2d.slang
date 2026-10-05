@@ -1,6 +1,6 @@
 import nx_core;
 import atlas;
-import interop;
+import interop2d;
 
 #include "live2d/live2d_interop.h"
 
