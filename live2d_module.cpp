@@ -201,7 +201,7 @@ public:
             return;
           use_pipelines(ctx, *renderer, format);
           renderer->draw(ctx.device(), graph, target, format,
-                         context.scene_push.cameras, *frame);
+                         context.scene_push.cameras.value, *frame);
         }),
         nxe::PassTraits{.scope = nxe::PassScope::Node,
                         .needs = nxe::PassNeed::View});
@@ -234,7 +234,7 @@ public:
             return;
           use_pipelines(ctx, *renderer, format);
           renderer->draw(ctx.device(), graph, target, format,
-                         context.scene_push.cameras, *frame);
+                         context.scene_push.cameras.value, *frame);
         }),
         nxe::PassTraits{.scope = nxe::PassScope::Node,
                         .needs = nxe::PassNeed::View});

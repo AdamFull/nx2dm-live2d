@@ -2,7 +2,7 @@
 
 #include "core/foundation/containers/small_vector.h"
 #include "core/foundation/diagnostics/log.h"
-#include "rendering/render2d/render_interop.h"
+#include "rendering/render2d/scene_interop.h"
 #include "rendering/render2d/scene_renderer.h"
 
 #include <Model/CubismModel.hpp>
@@ -44,8 +44,8 @@ namespace core = Live2D::Cubism::Core;
 
 [[nodiscard]] u32 tint(const core::csmVector4 &multiply, const f32 opacity,
                        const glm::vec4 &view) noexcept {
-  return pack_color(glm::vec4(multiply.X * view.x, multiply.Y * view.y,
-                              multiply.Z * view.z, opacity * view.w));
+  return nx_pack_rgba8(glm::vec4(multiply.X * view.x, multiply.Y * view.y,
+                                 multiply.Z * view.z, opacity * view.w));
 }
 
 [[nodiscard]] bool uses_screen_colour(const core::csmVector4 &screen) noexcept {

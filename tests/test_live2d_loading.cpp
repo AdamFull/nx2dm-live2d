@@ -7,7 +7,7 @@
 #include "live2d/live2d_draw.h"
 #include "live2d/live2d_platform.h"
 #include "live2d/live2d_system.h"
-#include "rendering/render2d/render_interop.h"
+#include "rendering/rhi/shaders/nx_interop.h"
 
 #include <CubismFramework.hpp>
 #include <Id/CubismId.hpp>
