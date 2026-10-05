@@ -76,7 +76,7 @@ struct DrawMask {
 struct ModelDraw {
   u32 model = 0;
   u32 drawable = 0;
-  u32 texture = 0;
+  NxTexture2D<float4> texture{};
   u32 color = 0;
   nxe::r2d::MeshBlend blend = nxe::r2d::MeshBlend::Normal;
   DrawMask clip;
@@ -96,7 +96,7 @@ void copy_positions(const ModelAsset &asset, std::span<glm::vec2> out) noexcept;
 struct MaskShape {
   u32 model = 0;
   u32 drawable = 0;
-  u32 texture = 0;
+  NxTexture2D<float4> texture{};
   u32 atlas = 0;
   u32 channel = 0;
   /// Model space to the atlas's -1..1 clip space.

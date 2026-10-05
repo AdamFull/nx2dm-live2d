@@ -321,27 +321,27 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
   REQUIRE(sampler.valid());
 
   nx::vector<rhi::TextureHandle> pages;
-  const auto resolve = [&](const nx::string_view path) -> u32 {
+  const auto resolve = [&](const nx::string_view path) -> NxTexture2D<float4> {
     const auto bytes = nx::vfs::read(path);
     if (!bytes)
-      return pack_texture(NX_TEXTURE_NONE, 0);
+      return NxTexture2D<float4>::none();
     auto image = rhi::load_image_from_memory(
         std::span<const u8>(bytes->data(), bytes->size()));
     if (!image || image->format != rhi::Format::RGBA8_UNORM)
-      return pack_texture(NX_TEXTURE_NONE, 0);
+      return NxTexture2D<float4>::none();
 
     shrink(*image, 2048);
     const rhi::TextureHandle page =
         device.create_texture(image->texture_desc(path));
     if (!page.valid())
-      return pack_texture(NX_TEXTURE_NONE, 0);
+      return NxTexture2D<float4>::none();
     if (!device.uploader().upload_texture(page, *image).ok()) {
       device.destroy_texture(page);
-      return pack_texture(NX_TEXTURE_NONE, 0);
+      return NxTexture2D<float4>::none();
     }
     pages.push_back(page);
-    return pack_texture(device.texture_index(page),
-                        device.sampler_index(sampler));
+    return NxTexture2D<float4>::from_indices(device.texture_index(page),
+                                             device.sampler_index(sampler));
   };
 
   nx::string error;
@@ -349,8 +349,8 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
   REQUIRE(load_model(MODEL, TextureResolver(resolve), asset, error));
   if (pages.empty())
     SKIP("the fixture's pages are not RGBA8 images this can upload");
-  for (const u32 page : asset.textures())
-    REQUIRE((page >> 16) != NX_TEXTURE_NONE);
+  for (const NxTexture2D<float4> page : asset.textures())
+    REQUIRE(page.texture_index() != NX_TEXTURE_NONE);
 
   Animator animator(asset);
   animator.update(0.f);
@@ -420,7 +420,7 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
       upload("live2d draws", stream.records.data(),
              nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw));
   for (GpuMeshDraw &record : stream.records)
-    record.texture = nx_texture_2d<float4>(pack_texture(NX_TEXTURE_NONE, 0));
+    record.texture = NxTexture2D<float4>::none();
   const rhi::BufferHandle untextured =
       upload("live2d silhouette draws", stream.records.data(),
              nx::cast<u64>(stream.records.size()) * sizeof(GpuMeshDraw));

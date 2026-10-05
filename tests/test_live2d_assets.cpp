@@ -30,7 +30,7 @@ struct Mounted {
 [[nodiscard]] TextureResolver counting(nx::vector<nx::string> &seen) {
   return TextureResolver([&seen](const nx::string_view path) {
     seen.push_back(nx::string(path));
-    return pack_texture(nx::cast<u32>(seen.size()), 0);
+    return NxTexture2D<float4>::from_indices(nx::cast<u32>(seen.size()), 0);
   });
 }
 
@@ -56,7 +56,7 @@ TEST_CASE("live2d: a model3.json brings its moc, textures and motions") {
   REQUIRE(!pages.empty());
   for (usize i = 0; i < pages.size(); ++i) {
     CHECK(pages[i].view().starts_with("/Frieren/"));
-    CHECK((asset.textures()[i] >> 16) == nx::cast<u32>(i + 1));
+    CHECK(asset.textures()[i].texture_index() == nx::cast<u32>(i + 1));
   }
 
   CHECK(asset.has_physics());

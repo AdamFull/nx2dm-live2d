@@ -95,9 +95,10 @@ public:
                                            &ctx](const nx::string_view path) {
       const nxe::rhi::TextureHandle texture = m_textures.resolve(ctx, path);
       if (!texture.valid())
-        return pack_texture(NX_TEXTURE_NONE, 0);
-      return pack_texture(ctx.device().texture_index(texture),
-                          ctx.samplers().index(nxe::scene::sampler_bilinear()));
+        return NxTexture2D<float4>::none();
+      return NxTexture2D<float4>::from_indices(
+          ctx.device().texture_index(texture),
+          ctx.samplers().index(nxe::scene::sampler_bilinear()));
     }));
 
     if (!ctx.service_registrar().provide(SERVICE, PROVIDED_SERVICES[0].version,

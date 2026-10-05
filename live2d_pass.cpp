@@ -187,7 +187,7 @@ void DrawStream::build(const Frame &frame,
     record.world1 =
         glm::vec4(model.world[0][1], model.world[1][1], model.world[2][1], 0.f);
     record.channel = channel_vector(draw.clip.channel);
-    record.texture = nx_texture_2d<float4>(draw.texture);
+    record.texture = draw.texture;
     record.camera = model.camera;
     record.color = draw.color;
     const bool clipped = draw.clip.clipped() && draw.clip.atlas < logical;
@@ -227,7 +227,7 @@ void DrawStream::build(const Frame &frame,
     put_affine(record, shape.to_mask);
     record.channel = channel_vector(shape.channel);
     record.tile = shape.tile;
-    record.texture = nx_texture_2d<float4>(shape.texture);
+    record.texture = shape.texture;
     place_in_clip(record, tiles[shape.atlas]);
     commands[slot] = command(index_count(model, shape.drawable), slot);
   }
@@ -457,8 +457,8 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
         push.positions = positions;
         push.draws = draws;
         for (usize a = 0; a < atlases.size(); ++a)
-          push.masks[a] = nx_texture_2d<float4>(pack_texture(
-              device.texture_index(resources.texture(atlases[a])), m_sampler));
+          push.masks[a] = NxTexture2D<float4>::from_indices(
+              device.texture_index(resources.texture(atlases[a])), m_sampler);
 
         // Each run of draws at one blend is one multi-draw, in draw order.
         for (u32 i = 0; i < total;) {

@@ -32,7 +32,7 @@ struct Loaded {
       return;
     nx::string error;
     ok = load_model(MODEL, TextureResolver([](nx::string_view) {
-                      return pack_texture(PAGE, 0);
+                      return NxTexture2D<float4>::from_indices(PAGE, 0);
                     }),
                     asset, error);
     animator.bind(&asset);
@@ -155,8 +155,8 @@ TEST_CASE("live2d: the texture a drawable names is the one the manifest "
   REQUIRE(emit_model(fixture.asset, {}, channel) > 0u);
 
   for (const r2d::MeshDraw &draw : channel.draws) {
-    CHECK((draw.texture >> 16) == PAGE);
-    CHECK((draw.texture >> 16) != NX_TEXTURE_NONE);
+    CHECK(draw.texture.texture_index() == PAGE);
+    CHECK(draw.texture.texture_index() != NX_TEXTURE_NONE);
   }
 }
 

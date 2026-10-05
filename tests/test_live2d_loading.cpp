@@ -52,8 +52,9 @@ struct Loader {
         nx::fs::path_view(nx::string_view(NX_LIVE2D_BUNDLED_DIR)));
     ok = host != nullptr && nx::vfs::mount("/", host);
     Live2DSystem::register_components(registry);
-    system.set_resolver(
-        TextureResolver([](nx::string_view) { return pack_texture(PAGE, 0); }));
+    system.set_resolver(TextureResolver([](nx::string_view) {
+      return NxTexture2D<float4>::from_indices(PAGE, 0);
+    }));
     io = nx::make_unique<nx::vfs::AsyncIoService>(
         io_threads(), nx::vfs::AsyncIoConfig{.max_concurrent_requests = 2});
     system.bind_loads(*io, workers);
@@ -125,8 +126,8 @@ TEST_CASE("live2d loading: a bound system loads off the frame, then takes it") {
   CHECK(runtime->asset.parameter_count() == direct.parameter_count());
   CHECK(runtime->asset.motions().size() == direct.motions().size());
   REQUIRE(runtime->asset.textures().size() == direct.textures().size());
-  for (const u32 packed : runtime->asset.textures())
-    CHECK((packed >> 16) == PAGE);
+  for (const NxTexture2D<float4> packed : runtime->asset.textures())
+    CHECK(packed.texture_index() == PAGE);
   CHECK(runtime->asset.dependencies().size() == direct.dependencies().size());
   CHECK(runtime->asset.mesh()->vertex_count() == direct.mesh()->vertex_count());
 }
@@ -210,7 +211,7 @@ TEST_CASE("live2d loading: shutting down with loads in flight drains them") {
 TEST_CASE("live2d loading: a page that arrives after the load is taken up, not "
           "reloaded") {
   REQUIRE_BUNDLED();
-  u32 answer = pack_texture(NX_TEXTURE_NONE, 0);
+  NxTexture2D<float4> answer = NxTexture2D<float4>::none();
   Loader loader;
   REQUIRE(loader.ok);
   loader.system.set_resolver(
@@ -220,16 +221,16 @@ TEST_CASE("live2d loading: a page that arrives after the load is taken up, not "
   REQUIRE(loader.settle() == 1u);
   const Live2DRuntime &runtime = loader.registry.get<Live2DRuntime>(e);
   REQUIRE_FALSE(runtime.asset.textures().empty());
-  for (const u32 packed : runtime.asset.textures())
-    CHECK((packed >> 16) == NX_TEXTURE_NONE);
+  for (const NxTexture2D<float4> packed : runtime.asset.textures())
+    CHECK(packed.texture_index() == NX_TEXTURE_NONE);
   const auto *const model = runtime.asset.model();
   CHECK(loader.system.refresh_textures(loader.registry) == 0u);
 
-  answer = pack_texture(PAGE, 0);
+  answer = NxTexture2D<float4>::from_indices(PAGE, 0);
   CHECK(loader.system.refresh_textures(loader.registry) == 1u);
   CHECK(loader.system.refresh_textures(loader.registry) == 0u);
-  for (const u32 packed : runtime.asset.textures())
-    CHECK((packed >> 16) == PAGE);
+  for (const NxTexture2D<float4> packed : runtime.asset.textures())
+    CHECK(packed.texture_index() == PAGE);
   CHECK(runtime.asset.model() == model);
 }
 

@@ -33,7 +33,7 @@ struct Mounted {
 [[nodiscard]] TextureResolver counting(nx::vector<nx::string> &seen) {
   return TextureResolver([&seen](const nx::string_view path) {
     seen.push_back(nx::string(path));
-    return nx::cast<u32>(seen.size()) << 16;
+    return NxTexture2D<float4>::from_packed(nx::cast<u32>(seen.size()) << 16);
   });
 }
 
@@ -77,7 +77,7 @@ TEST_CASE("live2d: the bundled model loads with a moc, canvas and motions") {
   REQUIRE(!pages.empty());
   REQUIRE(asset.textures().size() == pages.size());
   for (usize i = 0; i < pages.size(); ++i)
-    CHECK((asset.textures()[i] >> 16) == nx::cast<u32>(i + 1));
+    CHECK(asset.textures()[i].texture_index() == nx::cast<u32>(i + 1));
 
   const CanvasInfo canvas = asset.canvas();
   CHECK(canvas.width > 0.f);
@@ -99,8 +99,8 @@ TEST_CASE("live2d: a view draws only the models on its layers") {
   registry.register_component<scene::RenderLayers>({.name = "RenderLayers"});
   Live2DSystem::register_components(registry);
   Live2DSystem system;
-  system.set_resolver(
-      TextureResolver([](nx::string_view) { return pack_texture(1, 0); }));
+  system.set_resolver(TextureResolver(
+      [](nx::string_view) { return NxTexture2D<float4>::from_indices(1, 0); }));
   const scene::Entity e = registry.create();
   registry.emplace<scene::WorldTransform2D>(e);
   registry.emplace<Live2DModel>(e).model = nx::string(MODEL);

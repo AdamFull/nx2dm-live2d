@@ -4,6 +4,7 @@
 #include "core/foundation/strings/utf8_string.h"
 #include "core/foundation/threading/sync.h"
 #include "core/foundation/vfs/vfs.h"
+#include "rendering/rhi/shaders/nx_interop.h"
 
 #include <glm/vec2.hpp>
 
@@ -19,7 +20,7 @@ class ACubismMotion;
 
 namespace nxm::live2d {
 
-using TextureResolver = nx::function<u32(nx::string_view path)>;
+using TextureResolver = nx::function<NxTexture2D<float4>(nx::string_view path)>;
 
 /// A part of the model a pointer may touch, as the model3.json names it,
 /// and the drawable it is: -1 where the moc has no drawable of that id.
@@ -167,7 +168,7 @@ public:
     return m_moc;
   }
 
-  [[nodiscard]] std::span<const u32> textures() const noexcept {
+  [[nodiscard]] std::span<const NxTexture2D<float4>> textures() const noexcept {
     return {m_textures.data(), m_textures.size()};
   }
   /// Where each of textures() comes from.
@@ -213,7 +214,7 @@ private:
   void reset() noexcept;
 
   Live2D::Cubism::Framework::CubismUserModel *m_owner = nullptr;
-  nx::vector<u32> m_textures;
+  nx::vector<NxTexture2D<float4>> m_textures;
   nx::vector<nx::string> m_texture_paths;
   nx::vector<MotionEntry> m_motions;
   nx::vector<ExpressionEntry> m_expressions;

@@ -408,8 +408,8 @@ usize resolve_textures(ModelAsset &asset, const TextureResolver &resolve) {
     const nx::string &path = asset.m_texture_paths[i];
     if (path.empty())
       continue;
-    const u32 packed =
-        resolve ? resolve(path.view()) : pack_texture(NX_TEXTURE_NONE, 0);
+    const NxTexture2D<float4> packed =
+        resolve ? resolve(path.view()) : NxTexture2D<float4>::none();
     changed += asset.m_textures[i] != packed ? 1u : 0u;
     asset.m_textures[i] = packed;
   }
@@ -588,13 +588,13 @@ bool build_model(const ModelSource &source, ModelAsset &out, nx::string &error,
     const char *const name = settings.GetTextureFileName(i);
     if (empty_name(name)) {
       out.m_texture_paths.emplace_back();
-      out.m_textures.push_back(pack_texture(NX_TEXTURE_NONE, 0));
+      out.m_textures.push_back(NxTexture2D<float4>::none());
       continue;
     }
     const nx::string path = beside(authored_path.view(), name);
     out.m_dependencies.push_back(path);
     out.m_texture_paths.push_back(path);
-    out.m_textures.push_back(pack_texture(NX_TEXTURE_NONE, 0));
+    out.m_textures.push_back(NxTexture2D<float4>::none());
   }
 
   nx::string path;

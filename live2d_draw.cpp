@@ -155,19 +155,20 @@ usize masked_drawable_count(const ModelAsset &asset) noexcept {
 
 namespace {
 
-[[nodiscard]] u32 texture_of(const ModelAsset &asset, csm::CubismModel &model,
-                             const i32 drawable) {
-  const std::span<const u32> textures = asset.textures();
+[[nodiscard]] NxTexture2D<float4> texture_of(const ModelAsset &asset,
+                                             csm::CubismModel &model,
+                                             const i32 drawable) {
+  const std::span<const NxTexture2D<float4>> textures = asset.textures();
   const i32 page = model.GetDrawableTextureIndex(drawable);
   return page >= 0 && nx::cast<usize>(page) < textures.size()
              ? textures[nx::cast<usize>(page)]
-             : pack_texture(NX_TEXTURE_NONE, 0);
+             : NxTexture2D<float4>::none();
 }
 
 struct Drawn {
   i32 drawable = 0;
   u32 color = 0;
-  u32 texture = 0;
+  NxTexture2D<float4> texture{};
   r2d::MeshBlend blend = r2d::MeshBlend::Normal;
 };
 

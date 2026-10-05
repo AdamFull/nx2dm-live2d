@@ -31,8 +31,9 @@ struct World {
     registry.register_component<scene::WorldTransform2D>(
         {.name = "WorldTransform2D"});
     Live2DSystem::register_components(registry);
-    system.set_resolver(
-        TextureResolver([](nx::string_view) { return pack_texture(PAGE, 0); }));
+    system.set_resolver(TextureResolver([](nx::string_view) {
+      return NxTexture2D<float4>::from_indices(PAGE, 0);
+    }));
   }
   ~World() {
     registry.clear();
@@ -177,7 +178,7 @@ TEST_CASE("live2d: a model named by a component is loaded, posed and drawn") {
   CHECK(frame.atlas_sizes[0] == runtime->masks.atlas_size());
 
   for (const ModelDraw &draw : frame.draws)
-    CHECK((draw.texture >> 16) == PAGE);
+    CHECK(draw.texture.texture_index() == PAGE);
 }
 
 TEST_CASE("live2d: an engine graph transitions and fades native motions") {
@@ -488,8 +489,9 @@ TEST_CASE("live2d: models advanced on the pool match one thread") {
       {.name = "WorldTransform2D"});
   Live2DSystem::register_components(registry);
   Live2DSystem pooled;
-  pooled.set_resolver(
-      TextureResolver([](nx::string_view) { return pack_texture(PAGE, 0); }));
+  pooled.set_resolver(TextureResolver([](nx::string_view) {
+    return NxTexture2D<float4>::from_indices(PAGE, 0);
+  }));
   nx::thread_pool pool;
   pooled.set_threads(&pool);
 

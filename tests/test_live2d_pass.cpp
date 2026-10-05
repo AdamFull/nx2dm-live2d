@@ -679,7 +679,7 @@ void check_masked_halves(const std::span<const u32> atlas_sizes,
   renderer.set_pipelines(pipelines.mask, pipelines.models,
                          rhi::Format::RGBA8_UNORM);
 
-  const u32 white = pack_texture(NX_TEXTURE_NONE, 0);
+  const NxTexture2D<float4> white = NxTexture2D<float4>::none();
 
   // Drawables 0 and 1 are the halves; 2 and 3 are the masks, already in the
   // atlas's clip space.
@@ -847,8 +847,8 @@ TEST_CASE(
       .mip_filter = rhi::FilterMode::Nearest,
   });
   REQUIRE(nearest.valid());
-  const u32 texture =
-      pack_texture(device.texture_index(page), device.sampler_index(nearest));
+  const NxTexture2D<float4> texture = NxTexture2D<float4>::from_indices(
+      device.texture_index(page), device.sampler_index(nearest));
 
   // Two bands of one model, each sampling its own texel; the model is drawn
   // at half size in the middle of the target.

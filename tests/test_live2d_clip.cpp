@@ -233,10 +233,10 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
       .address_v = rhi::AddressMode::ClampToEdge,
   });
   REQUIRE(sampler.valid());
-  const u32 atlas_packed =
-      pack_texture(device.texture_index(atlas), device.sampler_index(sampler));
-  REQUIRE((atlas_packed >> 16) != NX_TEXTURE_NONE);
-  REQUIRE((atlas_packed & 0xFFFFu) != 0xFFFFu);
+  const NxTexture2D<float4> atlas_packed = NxTexture2D<float4>::from_indices(
+      device.texture_index(atlas), device.sampler_index(sampler));
+  REQUIRE(atlas_packed.texture_index() != NX_TEXTURE_NONE);
+  REQUIRE((atlas_packed.value & 0xFFFFu) != 0xFFFFu);
 
   enum Pass : u32 { Unclipped, Clipped, Inverted, PassCount };
   nx::vector<u8> frames[PassCount];
@@ -317,7 +317,7 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
       push.cameras = device.buffer_address(cameras);
       push.positions = device.buffer_address(positions);
       push.draws = device.buffer_address(records);
-      push.masks[0] = nx_texture_2d<float4>(atlas_packed);
+      push.masks[0] = atlas_packed;
       cmd.push_constants(&push, sizeof(push));
       cmd.draw_indirect(commands, 0, stream.model_count(), STRIDE);
     }
