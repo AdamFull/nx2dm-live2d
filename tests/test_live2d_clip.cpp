@@ -224,8 +224,8 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
   const rhi::BufferHandle indices =
       upload("live2d indices", mesh.indices.data(),
              nx::cast<u64>(mesh.indices.size()) * sizeof(u32));
-  const MeshAddress address = {.uvs = device.buffer_address(uvs),
-                               .indices = device.buffer_address(indices)};
+  const MeshAddress address = {.uvs = {device.buffer_address(uvs)},
+                               .indices = {device.buffer_address(indices)}};
 
   const rhi::SamplerHandle sampler = device.create_sampler({
       .name = "live2d mask",
@@ -258,7 +258,7 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
     REQUIRE(stream.atlases[0] == glm::uvec2(ATLAS));
     const rhi::BufferHandle records =
         upload("live2d records", stream.records.data(),
-               nx::cast<u64>(stream.records.size()) * sizeof(DrawRecord));
+               nx::cast<u64>(stream.records.size()) * sizeof(GpuLive2DDraw));
     const rhi::BufferHandle commands =
         upload("live2d commands", stream.commands.data(),
                nx::cast<u64>(stream.commands.size()) *
@@ -284,9 +284,9 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
     cmd.set_scissor({{0, 0}, {ATLAS, ATLAS}});
     cmd.bind_pipeline(mask_pipeline);
     {
-      PushBlock push;
-      push.positions = device.buffer_address(positions);
-      push.draws = device.buffer_address(records);
+      GpuLive2DPush push;
+      push.positions = {device.buffer_address(positions)};
+      push.draws = {device.buffer_address(records)};
       cmd.push_constants(&push, sizeof(push));
       const u32 first = stream.atlas_first[0];
       cmd.draw_indirect(commands, first * STRIDE, stream.atlas_first[1] - first,
@@ -313,10 +313,10 @@ TEST_CASE("live2d: a mask keeps what it covers, and its inverse keeps the "
     cmd.set_scissor({{0, 0}, {TARGET, TARGET}});
     cmd.bind_pipeline(model_pipeline);
     {
-      PushBlock push;
-      push.cameras = device.buffer_address(cameras);
-      push.positions = device.buffer_address(positions);
-      push.draws = device.buffer_address(records);
+      GpuLive2DPush push;
+      push.cameras = {device.buffer_address(cameras)};
+      push.positions = {device.buffer_address(positions)};
+      push.draws = {device.buffer_address(records)};
       push.masks[0] = atlas_packed;
       cmd.push_constants(&push, sizeof(push));
       cmd.draw_indirect(commands, 0, stream.model_count(), STRIDE);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "live2d/live2d_draw.h"
+#include "live2d/live2d_interop.h"
 #include "rendering/graph/render_graph.h"
 #include "rendering/rhi/descs.h"
 #include "rendering/rhi/upload_ring.h"
@@ -43,43 +44,19 @@ struct Frame {
   }
 };
 
-inline constexpr u32 MAX_MASK_ATLASES = 16;
-inline constexpr u32 NO_MASK = 0xFFFFFFFFu;
+inline constexpr u32 MAX_MASK_ATLASES = NX_L2D_MASK_ATLASES;
+inline constexpr u32 NO_MASK = NX_L2D_NO_MASK;
 inline constexpr u32 DEFAULT_ATLAS_LIMIT = 2048;
 
 // A model's static geometry on the GPU; zero until it is resident.
 struct MeshAddress {
-  u64 uvs = 0;
-  u64 indices = 0;
+  NxPtr<float2> uvs = {};
+  NxPtr<uint> indices = {};
 
   [[nodiscard]] bool resident() const noexcept {
-    return uvs != 0u && indices != 0u;
+    return uvs.is_valid() && indices.is_valid();
   }
 };
-
-// Mirrors Live2DDraw in live2d.slang. Positions are in model space: a model
-// draw reads row0/row1 as its model-to-atlas affine and world0/world1 as its
-// model-to-world one; a mask draw reads row0/row1 as model-to-clip and clamps
-// to tile.
-struct DrawRecord {
-  glm::vec4 row0{0.f};
-  glm::vec4 row1{0.f};
-  glm::vec4 world0{1.f, 0.f, 0.f, 0.f};
-  glm::vec4 world1{0.f, 1.f, 0.f, 0.f};
-  glm::vec4 channel{0.f};
-  glm::vec4 tile{-1.f, -1.f, 1.f, 1.f};
-  u64 uvs = 0;
-  u64 indices = 0;
-  u32 first_index = 0;
-  u32 first_vertex = 0;
-  u32 positions = 0;
-  NxTexture2D<float4> texture{};
-  u32 camera = 0;
-  u32 mask = NO_MASK;
-  u32 inverted = 0;
-  u32 color = 0;
-};
-static_assert(sizeof(DrawRecord) == 144);
 
 // A mask placed as a tile of a shared atlas: its own atlas's unit square maps
 // to [offset, offset + scale] of the shared one.
@@ -100,7 +77,7 @@ void pack_mask_atlases(std::span<const u32> sizes, u32 limit,
 // by first_instance: the models' draws in order, then the mask shapes grouped
 // by shared atlas.
 struct DrawStream {
-  nx::vector<DrawRecord> records;
+  nx::vector<GpuLive2DDraw> records;
   nx::vector<nxe::rhi::DrawIndirectCommand> commands;
   nx::small_vector<u32, MAX_MASK_ATLASES + 1> atlas_first;
   nx::small_vector<MaskTile, MAX_MASK_ATLASES> tiles;
@@ -117,13 +94,7 @@ struct DrawStream {
              u32 atlas_limit = DEFAULT_ATLAS_LIMIT);
 };
 
-struct PushBlock {
-  u64 cameras = 0;
-  u64 positions = 0;
-  u64 draws = 0;
-  NxTexture2D<float4> masks[MAX_MASK_ATLASES]{};
-};
-static_assert(sizeof(PushBlock) <= nxe::rhi::PUSH_CONSTANT_SIZE,
+static_assert(sizeof(GpuLive2DPush) <= nxe::rhi::PUSH_CONSTANT_SIZE,
               "the Live2D push block must fit the guaranteed push range");
 
 class ModelRenderer {

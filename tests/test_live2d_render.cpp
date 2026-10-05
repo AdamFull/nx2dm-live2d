@@ -27,15 +27,6 @@ namespace rhi = nxe::rhi;
 
 constexpr u32 TARGET = 256;
 
-struct MeshPush {
-  u64 cameras = 0;
-  u64 vertices = 0;
-  u64 indices = 0;
-  u64 materials = 0;
-  u64 draws = 0;
-  ::MeshPushFields fields = {};
-};
-
 struct TestDevice {
   rhi::Device device;
   bool ready = false;
@@ -235,11 +226,11 @@ TEST_CASE("live2d: a model reaches the framebuffer, and driving it changes "
                nx::cast<u64>(stream.commands.size()) *
                    sizeof(rhi::DrawIndirectCommand));
 
-    MeshPush push;
-    push.cameras = device.buffer_address(cameras);
-    push.vertices = device.buffer_address(vertices);
-    push.indices = device.buffer_address(indices);
-    push.draws = device.buffer_address(records);
+    GpuMeshPush push;
+    push.cameras = {device.buffer_address(cameras)};
+    push.vertices = {device.buffer_address(vertices)};
+    push.indices = {device.buffer_address(indices)};
+    push.draws = {device.buffer_address(records)};
 
     rhi::CommandContext cmd;
     REQUIRE(device.begin_headless_frame(cmd));
@@ -428,10 +419,10 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
       "live2d draw commands", stream.commands.data(),
       nx::cast<u64>(stream.commands.size()) * sizeof(rhi::DrawIndirectCommand));
 
-  MeshPush push;
-  push.cameras = device.buffer_address(cameras);
-  push.vertices = device.buffer_address(vertices);
-  push.indices = device.buffer_address(indices);
+  GpuMeshPush push;
+  push.cameras = {device.buffer_address(cameras)};
+  push.vertices = {device.buffer_address(vertices)};
+  push.indices = {device.buffer_address(indices)};
 
   enum Pass : u32 { Pages, Silhouette, PassCount };
   nx::vector<u8> frames[PassCount];
@@ -454,7 +445,7 @@ TEST_CASE("live2d: a model's own pages land on it, not on the empty half of "
         {.width = nx::cast<f32>(TARGET), .height = nx::cast<f32>(TARGET)});
     cmd.set_scissor({{0, 0}, {TARGET, TARGET}});
     cmd.bind_pipeline(pipeline);
-    push.draws = device.buffer_address(pass == Pages ? textured : untextured);
+    push.draws = {device.buffer_address(pass == Pages ? textured : untextured)};
     cmd.push_constants(&push, sizeof(push));
     cmd.draw_indirect(commands, 0, nx::cast<u32>(stream.commands.size()),
                       sizeof(rhi::DrawIndirectCommand));

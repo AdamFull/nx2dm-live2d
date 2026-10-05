@@ -34,7 +34,7 @@ rhi::BlendMode pipeline_blend(const r2d::MeshBlend blend) noexcept {
 
 namespace {
 
-void put_affine(DrawRecord &record, const glm::mat3 &m) noexcept {
+void put_affine(GpuLive2DDraw &record, const glm::mat3 &m) noexcept {
   record.row0 = glm::vec4(m[0][0], m[1][0], m[2][0], 0.f);
   record.row1 = glm::vec4(m[0][1], m[1][1], m[2][1], 0.f);
 }
@@ -56,14 +56,14 @@ void put_affine(DrawRecord &record, const glm::mat3 &m) noexcept {
 // A tile's unit square in atlas UV is [offset, offset + scale]; in clip
 // space, where the atlas spans -1..1, that is c' = scale * c + (scale - 1 +
 // 2 * offset) per axis.
-void place_in_uv(DrawRecord &record, const MaskTile &tile) noexcept {
+void place_in_uv(GpuLive2DDraw &record, const MaskTile &tile) noexcept {
   record.row0 *= tile.scale.x;
   record.row1 *= tile.scale.y;
   record.row0.z += tile.offset.x;
   record.row1.z += tile.offset.y;
 }
 
-void place_in_clip(DrawRecord &record, const MaskTile &tile) noexcept {
+void place_in_clip(GpuLive2DDraw &record, const MaskTile &tile) noexcept {
   const glm::vec2 shift = tile.scale - 1.f + 2.f * tile.offset;
   record.row0 *= tile.scale.x;
   record.row1 *= tile.scale.y;
@@ -124,7 +124,7 @@ void pack_mask_atlases(
 namespace {
 
 // The drawable's place in its model's mesh and the frame's positions.
-void place_drawable(DrawRecord &record, const FrameModel &model,
+void place_drawable(GpuLive2DDraw &record, const FrameModel &model,
                     const MeshAddress &address, const u32 drawable) noexcept {
   const ModelMesh &mesh = *model.mesh;
   record.uvs = address.uvs;
@@ -179,7 +179,7 @@ void DrawStream::build(const Frame &frame,
       continue;
     const FrameModel &model = frame.models[draw.model];
     const usize slot = records.size();
-    DrawRecord &record = records.emplace_back();
+    GpuLive2DDraw &record = records.emplace_back();
     place_drawable(record, model, meshes[draw.model], draw.drawable);
     put_affine(record, draw.clip.to_mask);
     record.world0 =
@@ -221,7 +221,7 @@ void DrawStream::build(const Frame &frame,
       continue;
     const FrameModel &model = frame.models[shape.model];
     const u32 slot = next[tiles[shape.atlas].atlas]++;
-    DrawRecord &record = records[slot];
+    GpuLive2DDraw &record = records[slot];
     record = {};
     place_drawable(record, model, meshes[shape.model], shape.drawable);
     put_affine(record, shape.to_mask);
@@ -381,9 +381,9 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
                  m_atlas_limit);
   if (m_stream.records.empty())
     return;
-  const u64 draws =
-      m_ring.write(DRAWS, m_stream.records.data(),
-                   nx::cast<u64>(m_stream.records.size()) * sizeof(DrawRecord));
+  const u64 draws = m_ring.write(DRAWS, m_stream.records.data(),
+                                 nx::cast<u64>(m_stream.records.size()) *
+                                     sizeof(GpuLive2DDraw));
   if (draws == 0 || m_ring.write(COMMANDS, m_stream.commands.data(),
                                  nx::cast<u64>(m_stream.commands.size()) *
                                      sizeof(rhi::DrawIndirectCommand)) == 0)
@@ -418,9 +418,9 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
           if (count == 0u)
             return;
           cmd.bind_pipeline(m_mask_pipeline);
-          PushBlock push;
-          push.positions = positions;
-          push.draws = draws;
+          GpuLive2DPush push;
+          push.positions = {positions};
+          push.draws = {draws};
           cmd.push_constants(&push, sizeof(push));
           for (u32 done = 0; done < count;) {
             const u32 run = nx::min(count - done, MAX_MULTI_DRAW);
@@ -452,10 +452,10 @@ void ModelRenderer::draw(rhi::Device &device, rg::RenderGraph &graph,
                      draws, blends = std::move(blends),
                      total](rhi::CommandContext &cmd,
                             const rg::Resources &resources) {
-        PushBlock push;
-        push.cameras = cameras;
-        push.positions = positions;
-        push.draws = draws;
+        GpuLive2DPush push;
+        push.cameras = {cameras};
+        push.positions = {positions};
+        push.draws = {draws};
         for (usize a = 0; a < atlases.size(); ++a)
           push.masks[a] = NxTexture2D<float4>::from_indices(
               device.texture_index(resources.texture(atlases[a])), m_sampler);

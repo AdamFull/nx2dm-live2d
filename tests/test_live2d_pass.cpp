@@ -484,7 +484,8 @@ TEST_CASE("live2d: the draw stream groups masks by atlas after the model") {
   frame.masks.push_back({.model = model, .drawable = 0, .atlas = 7});
   frame.atlas_sizes = {64, 128};
 
-  static constexpr MeshAddress MESH[] = {{.uvs = 0x1000, .indices = 0x2000}};
+  static constexpr MeshAddress MESH[] = {
+      {.uvs = {0x1000}, .indices = {0x2000}}};
   DrawStream stream;
   stream.build(frame, MESH);
 
@@ -500,8 +501,8 @@ TEST_CASE("live2d: the draw stream groups masks by atlas after the model") {
     CHECK(stream.commands[i].first_instance == i);
     CHECK(stream.commands[i].instance_count == 1u);
     CHECK(stream.commands[i].vertex_count == 6u);
-    CHECK(stream.records[i].uvs == 0x1000u);
-    CHECK(stream.records[i].indices == 0x2000u);
+    CHECK(stream.records[i].uvs.value == 0x1000u);
+    CHECK(stream.records[i].indices.value == 0x2000u);
   }
   CHECK(stream.records[1].first_vertex == 4u);
   CHECK(stream.records[1].first_index == 6u);

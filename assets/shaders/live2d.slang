@@ -2,38 +2,10 @@ import nx_core;
 import atlas;
 import interop;
 
-static const uint NX_L2D_MASK_ATLASES = 16;
-
-// Mirrors DrawRecord in live2d_pass.h. Positions are in model space; uvs and
-// indices are the model's static mesh, uploaded once.
-struct Live2DDraw {
-    float4 row0;
-    float4 row1;
-    float4 world0;
-    float4 world1;
-    float4 channel;
-    float4 tile;
-    NxPtr<float2> uvs;
-    NxPtr<uint> indices;
-    uint first_index;
-    uint first_vertex;
-    uint positions;
-    NxTexture2D<float4> texture;
-    uint camera;
-    uint mask;
-    uint inverted;
-    uint color;
-};
-
-struct Live2DPush {
-    NxPtr<GpuCamera2D> cameras;
-    NxPtr<float2> positions;
-    NxPtr<Live2DDraw> draws;
-    NxTexture2D<float4> masks[NX_L2D_MASK_ATLASES];
-};
+#include "live2d/live2d_interop.h"
 
 [[vk::push_constant]]
-Live2DPush pc;
+GpuLive2DPush pc;
 
 struct MaskOutput {
     float4 position : SV_Position;
@@ -60,7 +32,7 @@ float2 nx_l2d_affine(float4 row0, float4 row1, float2 p) {
 }
 
 // The drawable's vertex_id-th corner: its model-space position and uv.
-void nx_l2d_vertex(Live2DDraw record, uint vertex_id, out float2 position,
+void nx_l2d_vertex(GpuLive2DDraw record, uint vertex_id, out float2 position,
                    out float2 uv) {
     const uint vertex =
         record.first_vertex + record.indices[record.first_index + vertex_id];
@@ -72,7 +44,7 @@ void nx_l2d_vertex(Live2DDraw record, uint vertex_id, out float2 position,
 MaskOutput mask_vs(uint vertex_id: SV_VertexID,
                    uint instance_id: SV_InstanceID,
                    uint start_instance: SV_StartInstanceLocation) {
-    const Live2DDraw record = pc.draws[start_instance + instance_id];
+    const GpuLive2DDraw record = pc.draws[start_instance + instance_id];
     float2 position;
     float2 uv;
     nx_l2d_vertex(record, vertex_id, position, uv);
@@ -107,7 +79,7 @@ float4 mask_fs(MaskOutput input): SV_Target {
 ModelOutput model_vs(uint vertex_id: SV_VertexID,
                      uint instance_id: SV_InstanceID,
                      uint start_instance: SV_StartInstanceLocation) {
-    const Live2DDraw record = pc.draws[start_instance + instance_id];
+    const GpuLive2DDraw record = pc.draws[start_instance + instance_id];
     float2 position;
     float2 uv;
     nx_l2d_vertex(record, vertex_id, position, uv);
