@@ -6,7 +6,6 @@
 #include "core/foundation/serialization/json_document.h"
 #include "core/foundation/strings/format.h"
 
-#include <cstdio>
 #include <cstring>
 
 namespace assetc {
@@ -125,9 +124,8 @@ source_views(const Inputs &inputs) {
   Inputs inputs;
   nx::string error;
   if (!read_inputs(context.source, inputs, error)) {
-    std::fprintf(stderr, "assetc: Live2D '%.*s' is invalid: %.*s\n",
-                 static_cast<int>(context.source.size()), context.source.data(),
-                 static_cast<int>(error.size()), error.data());
+    context.report(
+        nx::format("Live2D '{}' is invalid: {}", context.source, error));
     return false;
   }
   const auto sources = source_views(inputs);
