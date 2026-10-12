@@ -112,13 +112,50 @@ nx::small_vector<nx::string_view, 4> hit_areas_at(const ModelAsset &asset,
   return out;
 }
 
-std::optional<glm::vec2> model_point(const Live2DModel &model,
-                                     const nxe::scene::WorldTransform2D &node,
-                                     const glm::vec2 world) noexcept {
+bool drawable_covers(const ModelAsset &asset, const glm::vec2 local) noexcept {
+  const auto side = [](const glm::vec2 from, const glm::vec2 to,
+                       const glm::vec2 at) {
+    return (to.x - from.x) * (at.y - from.y) -
+           (to.y - from.y) * (at.x - from.x);
+  };
+  for (i32 d = 0; d < nx::cast<i32>(asset.drawable_count()); ++d) {
+    if (!drawable_visible(asset, d))
+      continue;
+    const DrawableMesh mesh = drawable_mesh(asset, d);
+    for (usize t = 0; t + 2 < mesh.indices.size(); t += 3) {
+      const usize ia = mesh.indices[t];
+      const usize ib = mesh.indices[t + 1];
+      const usize ic = mesh.indices[t + 2];
+      if (ia >= mesh.positions.size() || ib >= mesh.positions.size() ||
+          ic >= mesh.positions.size())
+        continue;
+      const glm::vec2 a = mesh.positions[ia];
+      const glm::vec2 b = mesh.positions[ib];
+      const glm::vec2 c = mesh.positions[ic];
+      const f32 ab = side(a, b, local);
+      const f32 bc = side(b, c, local);
+      const f32 ca = side(c, a, local);
+      if ((ab >= 0.f && bc >= 0.f && ca >= 0.f) ||
+          (ab <= 0.f && bc <= 0.f && ca <= 0.f))
+        return true;
+    }
+  }
+  return false;
+}
+
+glm::mat3 model_placement(const Live2DModel &model,
+                          const nxe::scene::WorldTransform2D &node) noexcept {
   // As emit places it: the node's transform, its axes scaled.
   glm::mat3 placed = node.world;
   placed[0] *= model.scale;
   placed[1] *= model.scale;
+  return placed;
+}
+
+std::optional<glm::vec2> model_point(const Live2DModel &model,
+                                     const nxe::scene::WorldTransform2D &node,
+                                     const glm::vec2 world) noexcept {
+  const glm::mat3 placed = model_placement(model, node);
   const f32 determinant =
       placed[0][0] * placed[1][1] - placed[1][0] * placed[0][1];
   if (glm::abs(determinant) < 1e-12f)

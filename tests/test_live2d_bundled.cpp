@@ -9,6 +9,8 @@
 
 #include <glm/common.hpp>
 
+#include <optional>
+
 namespace {
 
 using namespace nxm::live2d;
@@ -424,4 +426,65 @@ TEST_CASE("live2d: a hit area is where its drawable is in the pose") {
   CHECK(local->y == nxtest::Approx(point.y).margin(1e-4f));
   model.scale = 0.f;
   CHECK_FALSE(model_point(model, node, {0.f, 0.f}).has_value());
+}
+
+TEST_CASE("live2d: a model is picked where it draws, and not beside it") {
+  REQUIRE_BUNDLED();
+  Mounted mount;
+  REQUIRE(mount.ok);
+
+  nxe::scene::registry_t registry;
+  registry.register_component<nxe::scene::WorldTransform2D>(
+      {.name = "WorldTransform2D"});
+  Live2DSystem::register_components(registry);
+  const nxe::scene::Entity e = registry.create();
+  registry.emplace<nxe::scene::WorldTransform2D>(e).world[2] =
+      glm::vec3(3.f, -1.f, 1.f);
+  Live2DModel &model = registry.emplace<Live2DModel>(e);
+  model.scale = 2.f;
+  Live2DRuntime &runtime = registry.emplace<Live2DRuntime>(e);
+  nx::string error;
+  REQUIRE(load_model(MODEL, {}, runtime.asset, error));
+  Animator animator(runtime.asset);
+  animator.update(1.f / 60.f);
+
+  // The middle of the first triangle a visible drawable draws, where the
+  // model is placed.
+  std::optional<glm::vec2> local;
+  for (i32 d = 0; !local && d < nx::cast<i32>(runtime.asset.drawable_count());
+       ++d) {
+    const DrawableMesh mesh = drawable_mesh(runtime.asset, d);
+    if (!drawable_visible(runtime.asset, d) || mesh.indices.size() < 3u)
+      continue;
+    local = (mesh.positions[mesh.indices[0]] + mesh.positions[mesh.indices[1]] +
+             mesh.positions[mesh.indices[2]]) /
+            3.f;
+  }
+  REQUIRE(local.has_value());
+  const glm::vec2 inside = glm::vec2(
+      model_placement(model, registry.get<nxe::scene::WorldTransform2D>(e)) *
+      glm::vec3(*local, 1.f));
+
+  const Live2DSystem system;
+  nx::vector<nxe::scene::Entity> found;
+  const auto collect = [&](const nxe::scene::Entity hit, i32) {
+    found.push_back(hit);
+  };
+  system.pick(registry, inside, collect);
+  REQUIRE(found.size() == 1u);
+  CHECK(found.front() == e);
+  found.clear();
+  system.pick(registry, {-5000.f, -5000.f}, collect);
+  CHECK(found.empty());
+  system.pick_within(registry, inside - glm::vec2(0.01f),
+                     inside + glm::vec2(0.01f), collect);
+  REQUIRE(found.size() == 1u);
+  CHECK(found.front() == e);
+  found.clear();
+  system.pick_within(registry, {-5000.f, -5000.f}, {-4999.f, -4999.f}, collect);
+  CHECK(found.empty());
+
+  model.visible = false;
+  system.pick(registry, inside, collect);
+  CHECK(found.empty());
 }

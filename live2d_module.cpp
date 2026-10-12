@@ -9,6 +9,9 @@
 #include "app/rendering/gpu_pipelines.h"
 #include "rendering/render2d/frame_packet.h"
 #include "scene/scene_json.h"
+#if NX_WITH_EDITOR
+#include "editor/pick.h"
+#endif
 
 #include "core/foundation/diagnostics/log.h"
 #include "core/foundation/strings/format.h"
@@ -109,6 +112,24 @@ public:
     Live2DSystem::register_components(ctx.scene().registry());
     ctx.scene().formats().add(
         nxe::scene::described<Live2DModel>("live2d", "live2d_models"));
+#if NX_WITH_EDITOR
+    ctx.add_picker(
+        {.at = nxe::editor::Picker2D::At(
+             [this](const nxe::scene::Scene &scene, const glm::vec2 point,
+                    nx::vector<nxe::editor::PickHit> &out) {
+               m_system.pick(scene.registry(), point,
+                             [&](const nxe::scene::Entity e, const i32 layer) {
+                               out.push_back({e, layer});
+                             });
+             }),
+         .within = nxe::editor::Picker2D::Within(
+             [this](const nxe::scene::Scene &scene, const glm::vec2 lo,
+                    const glm::vec2 hi, nx::vector<nxe::scene::Entity> &out) {
+               m_system.pick_within(
+                   scene.registry(), lo, hi,
+                   [&](const nxe::scene::Entity e, i32) { out.push_back(e); });
+             })});
+#endif
     return true;
   }
 

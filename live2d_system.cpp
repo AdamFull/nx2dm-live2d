@@ -486,6 +486,53 @@ u32 mask_texels(const MaskLayout &masks, const CanvasInfo &canvas,
   return nx::clamp(wanted, nx::min(MIN_MASK_RESOLUTION, layout), layout);
 }
 
+void Live2DSystem::pick(const scene::registry_t &registry,
+                        const glm::vec2 world_point, const PickFn found) const {
+  registry
+      .view<const Live2DModel, const Live2DRuntime,
+            const scene::WorldTransform2D>()
+      .each([&](const scene::Entity e, const Live2DModel &model,
+                const Live2DRuntime &runtime,
+                const scene::WorldTransform2D &node) {
+        if (!model.visible || !runtime.ready())
+          return;
+        const std::optional<glm::vec2> local =
+            model_point(model, node, world_point);
+        if (local && drawable_covers(runtime.asset, *local))
+          found(e, model.layer);
+      });
+}
+
+void Live2DSystem::pick_within(const scene::registry_t &registry,
+                               const glm::vec2 lo, const glm::vec2 hi,
+                               const PickFn found) const {
+  registry
+      .view<const Live2DModel, const Live2DRuntime,
+            const scene::WorldTransform2D>()
+      .each([&](const scene::Entity e, const Live2DModel &model,
+                const Live2DRuntime &runtime,
+                const scene::WorldTransform2D &node) {
+        if (!model.visible || !runtime.ready())
+          return;
+        const Bounds bounds = visible_bounds(runtime.asset);
+        if (!bounds.valid())
+          return;
+        const glm::mat3 placed = model_placement(model, node);
+        glm::vec2 min{std::numeric_limits<f32>::max()};
+        glm::vec2 max{std::numeric_limits<f32>::lowest()};
+        for (const glm::vec2 corner : {glm::vec2{bounds.min_x, bounds.min_y},
+                                       glm::vec2{bounds.max_x, bounds.min_y},
+                                       glm::vec2{bounds.max_x, bounds.max_y},
+                                       glm::vec2{bounds.min_x, bounds.max_y}}) {
+          const glm::vec2 world = glm::vec2(placed * glm::vec3(corner, 1.f));
+          min = glm::min(min, world);
+          max = glm::max(max, world);
+        }
+        if (min.x <= hi.x && max.x >= lo.x && min.y <= hi.y && max.y >= lo.y)
+          found(e, model.layer);
+      });
+}
+
 usize Live2DSystem::emit(scene::registry_t &registry, Frame &out,
                          const SceneView &view) {
   u64 mask_bytes = 0;

@@ -40,6 +40,16 @@ struct DrawableMesh {
 [[nodiscard]] nx::small_vector<nx::string_view, 4>
 hit_areas_at(const ModelAsset &asset, glm::vec2 local);
 
+/// Whether a visible drawable of @p asset covers @p local, a point in model
+/// space, by its triangles in the pose the model was last updated to.
+[[nodiscard]] bool drawable_covers(const ModelAsset &asset,
+                                   glm::vec2 local) noexcept;
+
+/// The matrix that places @p model's units where @p node draws it.
+[[nodiscard]] glm::mat3
+model_placement(const Live2DModel &model,
+                const nxe::scene::WorldTransform2D &node) noexcept;
+
 /// @p world in the space of the model @p model draws where @p node places
 /// it; nothing where that placement cannot be undone.
 [[nodiscard]] std::optional<glm::vec2>

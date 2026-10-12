@@ -4,6 +4,7 @@
 #include "live2d/live2d_draw.h"
 #include "live2d/live2d_pass.h"
 
+#include "core/foundation/core/callable.h"
 #include "core/foundation/threading/thread_pool.h"
 #include "core/foundation/vfs/asset_pipeline.h"
 #include "scene/animation/animation_graph.h"
@@ -73,6 +74,16 @@ public:
   usize update(nxe::scene::registry_t &registry,
                const nxe::scene::AssetRegistry &assets, f32 dt);
   usize update(nxe::scene::registry_t &registry, f32 dt);
+
+  using PickFn = nx::function_ref<void(nxe::scene::Entity, i32 layer)>;
+  /// Each visible model of @p registry one of whose visible drawables holds
+  /// @p world_point, with its layer, for the editor's picking.
+  void pick(const nxe::scene::registry_t &registry, glm::vec2 world_point,
+            PickFn found) const;
+  /// Each visible model whose visible bounds, where it is drawn, overlap the
+  /// world rectangle from @p lo to @p hi.
+  void pick_within(const nxe::scene::registry_t &registry, glm::vec2 lo,
+                   glm::vec2 hi, PickFn found) const;
 
   usize emit(nxe::scene::registry_t &registry, Frame &out,
              const SceneView &view);
