@@ -10,6 +10,7 @@
 #include "live2d/live2d_component.h"
 
 #include <chrono>
+#include <optional>
 
 namespace {
 
@@ -21,6 +22,9 @@ void quiet_configure(EngineConfig &config) {
   config.action_map = {};
   config.physics_rules = {};
   config.audio = false;
+  // Read back, so a test can see what a window drew.
+  config.offscreen_render = true;
+  config.swapchain_format = rhi::Format::RGBA8_UNORM;
 }
 
 struct Harness {
@@ -45,6 +49,40 @@ struct Harness {
   Harness(const Harness &) = delete;
   Harness &operator=(const Harness &) = delete;
 };
+
+/// @p window's next frame, once no pipeline has been compiling for a while:
+/// they compile asynchronously, and a frame drawn before is missing draws.
+[[nodiscard]] std::optional<FrameCapture> capture(Harness &h,
+                                                  const rt::WindowId window) {
+  u32 quiet = 0;
+  for (u32 tick = 0; tick < 5000 && quiet < 30u; ++tick) {
+    h.engine->on_tick(h.platform, 1.0 / 60.0);
+    const GpuPipelineLoadStats loads = h.engine->gpu_pipeline_load_stats();
+    quiet = loads.pending_pipelines == 0 && loads.pending_shader_sources == 0
+                ? quiet + 1u
+                : 0u;
+    nx::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  const u64 token = h.engine->request_frame_capture(window);
+  for (u32 frame = 0; frame < 600 && token != 0; ++frame) {
+    h.engine->on_tick(h.platform, 1.0 / 60.0);
+    if (h.engine->frame_capture_status(token) == FrameCaptureStatus::Ready)
+      return h.engine->take_frame_capture(token);
+    nx::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return std::nullopt;
+}
+
+/// Pixels of @p image that are not the clear colour.
+[[nodiscard]] usize drawn(const FrameCapture &image) {
+  usize count = 0;
+  for (usize i = 0; i + 3 < image.pixels.size(); i += 4)
+    count += image.pixels[i] > 40u || image.pixels[i + 1] > 40u ||
+                     image.pixels[i + 2] > 40u
+                 ? 1u
+                 : 0u;
+  return count;
+}
 
 [[nodiscard]] bool ordered(const Engine &engine, const nx::string_view name) {
   for (const nx::string &pass : engine.passes().ordered())
@@ -282,4 +320,51 @@ TEST_CASE("live2d: its passes draw only where there is a camera") {
                                     "'post'"));
   CHECK(unmet[1].view().starts_with("'live2d.targets' needs view, which node "
                                     "'post'"));
+}
+
+TEST_CASE("live2d: a window layer bound to a scene draws its models") {
+  constexpr nx::string_view MODEL = "/live2d/Hiyori.model3.json";
+  if (!nx::fs::exists(
+          nx::fs::path_view(nx::string(nx::string_view(NX_LIVE2D_BUNDLED_DIR)) +
+                            nx::string(MODEL))))
+    SKIP("bundled Hiyori model absent from the build tree");
+  Harness h;
+  if (!h.ready)
+    SKIP("no usable RHI device");
+  const nx::vfs::MountId bundled =
+      nx::vfs::mount("/",
+                     nx::vfs::make_host_device(nx::fs::path_view(
+                         nx::string_view(NX_LIVE2D_BUNDLED_DIR))),
+                     100);
+  REQUIRE(bundled.valid());
+
+  const scene::SceneId id = h.engine->create_preview_scene();
+  scene::Scene &preview = *h.engine->scene(id);
+  const scene::Entity e = preview.create_node("model");
+  preview.registry().emplace<Live2DModel>(
+      e, Live2DModel{.model = nx::string(MODEL)});
+  for (u32 frame = 0; frame < 3000; ++frame) {
+    const Live2DRuntime *const runtime =
+        preview.registry().try_get<Live2DRuntime>(e);
+    if (runtime != nullptr && runtime->ready())
+      break;
+    h.engine->on_tick(h.platform, 1.0 / 60.0);
+    nx::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  const rt::WindowId window =
+      h.engine->open_window({.title = "preview", .width = 64, .height = 64});
+  REQUIRE(window.valid());
+  REQUIRE(h.engine->set_window_frame(window, WindowFrame::Preview));
+  // Hiyori is a couple of units tall about the origin.
+  REQUIRE(h.engine->bind_layer_view(window, PREVIEW_LAYER, id,
+                                    {.eye = {0.f, 0.f}, .ortho_height = 4.f}));
+  usize seen = 0;
+  for (u32 attempt = 0; attempt < 10 && seen < 40u; ++attempt) {
+    const std::optional<FrameCapture> image = capture(h, window);
+    REQUIRE(image.has_value());
+    seen = drawn(*image);
+  }
+  CHECK(seen >= 40u);
+  h.engine->close_window(window);
+  nx::vfs::unmount(bundled);
 }

@@ -222,6 +222,15 @@ public:
           }
         }));
     ctx.schedule().add(nxe::sys::Stage::Present, EMIT_SYSTEM);
+    // A layer bound to a scene draws its models through the layer's camera.
+    ctx.add_layer_extract(nxe::LayerExtractFn(
+        [this, &ctx](nxe::scene::Scene &scene, nxe::r2d::FramePacket &layer) {
+          Frame &frame = layer.channel<Frame>();
+          frame.clear();
+          (void)m_system.emit(scene.registry(), frame,
+                              view_of(ctx, layer, layer.active_camera,
+                                      nxe::scene::WINDOW_LAYER));
+        }));
     ctx.schedule()
         .declare<const Live2DModel, Live2DRuntime,
                  const nxe::scene::WorldTransform2D,
@@ -240,7 +249,8 @@ public:
           const nxe::rg::TextureId target =
               context.target(nxe::TARGET_SCENE_COLOR);
           const nxe::rhi::Format format = graph.format(target);
-          ModelRenderer *const renderer = world_renderer(ctx, context.node);
+          ModelRenderer *const renderer =
+              world_renderer(ctx, context.node, context.window);
           if (renderer == nullptr)
             return;
           use_pipelines(ctx, *renderer, format);
@@ -255,6 +265,7 @@ public:
         ctx.has_pass_slot(MODULE_SLOT) ? MODULE_SLOT : WORLD_SLOT;
     if (!ctx.fill_pass_slot(slot, MINE, name()))
       nx::logw("live2d: nothing to fill; the frame has no '{}' slot", slot);
+    ctx.add_preview_passes(MINE);
 
     ctx.passes().define(
         TARGETS_PASS,
@@ -394,11 +405,15 @@ private:
   }
 
   [[nodiscard]] ModelRenderer *world_renderer(nxe::ModuleContext &ctx,
-                                              const nxe::ComposedNode *node) {
-    const nx::string_view name =
-        node != nullptr ? node->name.view() : nx::string_view{};
+                                              const nxe::ComposedNode *node,
+                                              const nxe::rt::WindowId window) {
+    // One draws once a frame: windows that share a node name, as previews
+    // all do, each have their own.
+    nx::string name(node != nullptr ? node->name.view() : nx::string_view{});
+    if (window != nxe::rt::PRIMARY_WINDOW)
+      name = nx::format("{}#{}", name, window.raw());
     ModelRenderer *const renderer = m_world_renderers.renderer(
-        name, [&](const nx::string_view renderer_name) {
+        name.view(), [&](const nx::string_view renderer_name) {
           return make_renderer(ctx, renderer_name);
         });
     if (renderer == nullptr &&
