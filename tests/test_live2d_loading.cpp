@@ -304,3 +304,58 @@ TEST_CASE("live2d loading: the textures in use are those of the models "
   loader.registry.destroy(second);
   CHECK(loader.system.textures_in_use(loader.registry, in_use) == usize{0});
 }
+
+TEST_CASE("live2d loading: two scenes' models load apart, though their "
+          "entities share numbers") {
+  REQUIRE_BUNDLED();
+  Loader loader;
+  REQUIRE(loader.ok);
+  scene::registry_t other;
+  Live2DSystem::register_components(other);
+
+  const scene::Entity here = loader.place(MODEL);
+  const scene::Entity there = other.create();
+  other.emplace<Live2DModel>(there, Live2DModel{.model = nx::string(MODEL)});
+  REQUIRE(here.raw() == there.raw());
+
+  (void)loader.system.load_pending(loader.registry);
+  (void)loader.system.load_pending(other);
+  CHECK(loader.system.loads_in_flight() == 2u);
+  for (u32 frame = 0; frame < 2000 && loader.system.loads_in_flight() != 0;
+       ++frame) {
+    (void)loader.system.load_pending(loader.registry, 1.f / 60.f);
+    (void)loader.system.load_pending(other, 1.f / 60.f);
+    nx::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  const Live2DRuntime *const mine =
+      loader.registry.try_get<Live2DRuntime>(here);
+  const Live2DRuntime *const theirs = other.try_get<Live2DRuntime>(there);
+  REQUIRE(mine != nullptr);
+  REQUIRE(theirs != nullptr);
+  CHECK(mine->ready());
+  CHECK(theirs->ready());
+  other.clear();
+}
+
+TEST_CASE("live2d loading: a scene that goes takes its pending loads with it") {
+  REQUIRE_BUNDLED();
+  Loader loader;
+  REQUIRE(loader.ok);
+  scene::registry_t other;
+  Live2DSystem::register_components(other);
+  const scene::Entity here = loader.place(MODEL);
+  const scene::Entity there = other.create();
+  other.emplace<Live2DModel>(there, Live2DModel{.model = nx::string(MODEL)});
+
+  (void)loader.system.load_pending(loader.registry);
+  (void)loader.system.load_pending(other);
+  REQUIRE(loader.system.loads_in_flight() == 2u);
+  loader.system.forget(other);
+  CHECK(loader.system.loads_in_flight() == 1u);
+  CHECK(loader.settle() == 1u);
+  const Live2DRuntime *const mine =
+      loader.registry.try_get<Live2DRuntime>(here);
+  REQUIRE(mine != nullptr);
+  CHECK(mine->ready());
+  other.clear();
+}

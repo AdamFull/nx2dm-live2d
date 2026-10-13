@@ -119,9 +119,13 @@ void Live2DSystem::shutdown_loads() noexcept {
   m_async = false;
 }
 
-void Live2DSystem::start_load(const scene::Entity entity,
+void Live2DSystem::start_load(const scene::registry_t &registry,
+                              const scene::Entity entity,
                               const Live2DModel &model) {
-  const nx::string key = nx::format("{}#{}", model.model, entity.raw());
+  // Entities of different scenes share numbers, so the scene is in the key.
+  const nx::string key =
+      nx::format("{}#{}#{}", model.model,
+                 reinterpret_cast<uintptr_t>(&registry), entity.raw());
   const nx::vfs::AssetLoadHandle handle = m_loads.request(
       {.key = key.view(), .generation = ++m_load_generation},
       ModelLoadPipeline::AcquireFn(
@@ -149,7 +153,18 @@ void Live2DSystem::start_load(const scene::Entity entity,
             return prepared;
           }));
   if (handle.valid())
-    m_pending.push_back({entity, model.model, handle});
+    m_pending.push_back({&registry, entity, model.model, handle});
+}
+
+void Live2DSystem::forget(const scene::registry_t &registry) {
+  for (usize i = 0; i < m_pending.size();)
+    if (m_pending[i].registry == &registry) {
+      (void)m_loads.release(m_pending[i].handle);
+      m_pending[i] = std::move(m_pending.back());
+      m_pending.pop_back();
+    } else {
+      ++i;
+    }
 }
 
 usize Live2DSystem::take_loads(scene::registry_t &registry) {
@@ -157,6 +172,10 @@ usize Live2DSystem::take_loads(scene::registry_t &registry) {
   usize taken = 0;
   for (usize i = 0; i < m_pending.size();) {
     PendingLoad &pending = m_pending[i];
+    if (pending.registry != &registry) {
+      ++i;
+      continue;
+    }
     const bool alive = registry.alive(pending.entity);
     const Live2DModel *const model =
         alive ? registry.try_get<Live2DModel>(pending.entity) : nullptr;
@@ -243,7 +262,7 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
           return;
         }
         for (const PendingLoad &pending : m_pending)
-          if (pending.entity == e)
+          if (pending.registry == &registry && pending.entity == e)
             return;
         Live2DRuntime *const runtime = registry.try_get<Live2DRuntime>(e);
         if (runtime == nullptr || runtime->requested != model.model) {
@@ -269,7 +288,7 @@ usize Live2DSystem::load_pending(scene::registry_t &registry, const f32 dt) {
     runtime->asset = ModelAsset{};
 
     if (m_async) {
-      start_load(e, model);
+      start_load(registry, e, model);
       continue;
     }
     nx::string error;

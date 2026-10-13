@@ -5,7 +5,11 @@
 
 #include "app/engine.h"
 #include "app/module_system/module.h"
+#include "core/foundation/threading/thread.h"
+#include "core/foundation/vfs/vfs.h"
 #include "live2d/live2d_component.h"
+
+#include <chrono>
 
 namespace {
 
@@ -64,6 +68,61 @@ TEST_CASE("live2d: a scene made after the module knows its components and "
   for (const scene::ComponentIO &io : made.formats().entries())
     readable = readable || io.node_key == "live2d";
   CHECK(readable);
+}
+
+TEST_CASE("live2d: a preview scene's model loads while the game is paused, "
+          "and a game scene's waits for it") {
+  constexpr nx::string_view MODEL = "/live2d/Hiyori.model3.json";
+  if (!nx::fs::exists(
+          nx::fs::path_view(nx::string(nx::string_view(NX_LIVE2D_BUNDLED_DIR)) +
+                            nx::string(MODEL))))
+    SKIP("bundled Hiyori model absent from the build tree");
+  Harness h;
+  if (!h.ready)
+    SKIP("no usable RHI device");
+  const nx::vfs::MountId bundled =
+      nx::vfs::mount("/",
+                     nx::vfs::make_host_device(nx::fs::path_view(
+                         nx::string_view(NX_LIVE2D_BUNDLED_DIR))),
+                     100);
+  REQUIRE(bundled.valid());
+
+  const auto shown = [&](const scene::SceneId id) {
+    scene::Scene &held = *h.engine->scene(id);
+    const scene::Entity e = held.create_node("model");
+    held.registry().emplace<Live2DModel>(
+        e, Live2DModel{.model = nx::string(MODEL)});
+    return e;
+  };
+  const auto ready = [&](const scene::SceneId id, const scene::Entity e) {
+    const Live2DRuntime *const runtime =
+        h.engine->scene(id)->registry().try_get<Live2DRuntime>(e);
+    return runtime != nullptr && runtime->ready();
+  };
+  const scene::SceneId game = h.engine->create_scene();
+  const scene::SceneId preview = h.engine->create_preview_scene();
+  const scene::Entity in_game = shown(game);
+  const scene::Entity in_preview = shown(preview);
+
+  h.engine->set_paused(true);
+  for (u32 frame = 0; frame < 3000 && !ready(preview, in_preview); ++frame) {
+    h.engine->on_tick(h.platform, 1.0 / 60.0);
+    nx::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  CHECK(ready(preview, in_preview));
+  CHECK(h.engine->scene(game)->registry().try_get<Live2DRuntime>(in_game) ==
+        nullptr);
+
+  h.engine->set_paused(false);
+  for (u32 frame = 0; frame < 3000 && !ready(game, in_game); ++frame) {
+    h.engine->on_tick(h.platform, 1.0 / 60.0);
+    nx::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  CHECK(ready(game, in_game));
+  // A scene that goes while its model loads leaves nothing behind.
+  REQUIRE(h.engine->destroy_scene(preview));
+  h.engine->on_tick(h.platform, 1.0 / 60.0);
+  nx::vfs::unmount(bundled);
 }
 
 TEST_CASE("live2d: the module is in the build's registry") {

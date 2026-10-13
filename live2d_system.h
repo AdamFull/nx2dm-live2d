@@ -59,7 +59,12 @@ class Live2DSystem {
 public:
   static void register_components(nxe::scene::registry_t &registry);
 
+  /// Starts @p registry's models loading and takes up the loads of its that
+  /// are ready; each registry, a scene's, has loads of its own.
   usize load_pending(nxe::scene::registry_t &registry, f32 dt = 0.f);
+  /// Drops the loads still pending for @p registry's models, before its scene
+  /// goes.
+  void forget(const nxe::scene::registry_t &registry);
   /// Reloads changed model bundles/subresources without dropping the last
   /// valid pose when a new generation is malformed.
   usize reload_changed(nxe::scene::registry_t &registry);
@@ -157,12 +162,14 @@ private:
   [[nodiscard]] u32 mask_resolution(u32 requested) const noexcept;
 
   struct PendingLoad {
+    const nxe::scene::registry_t *registry = nullptr;
     nxe::scene::Entity entity{};
     nx::string path;
     nx::vfs::AssetLoadHandle handle;
   };
 
-  void start_load(nxe::scene::Entity entity, const Live2DModel &model);
+  void start_load(const nxe::scene::registry_t &registry,
+                  nxe::scene::Entity entity, const Live2DModel &model);
   usize take_loads(nxe::scene::registry_t &registry);
   void finish_load(const Live2DModel &model, Live2DRuntime &runtime);
   void fail_load(Live2DRuntime &runtime, const nx::string &error);

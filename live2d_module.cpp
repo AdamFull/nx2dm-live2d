@@ -143,8 +143,20 @@ public:
         nxe::scene::described<Live2DModel>("live2d", "live2d_models"));
   }
 
+  void on_scene_destroyed(nxe::ModuleContext &,
+                          nxe::scene::Scene &scene) override {
+    m_system.forget(scene.registry());
+    for (usize i = 0; i < m_refreshed.size(); ++i)
+      if (m_refreshed[i].registry == &scene.registry()) {
+        m_refreshed.erase(m_refreshed.begin() + nx::cast<isize>(i));
+        break;
+      }
+  }
+
   void on_hot_reload(nxe::ModuleContext &ctx) override {
-    (void)m_system.reload_changed(ctx.scene().registry());
+    ctx.for_each_scene([this](nxe::scene::Scene &scene) {
+      (void)m_system.reload_changed(scene.registry());
+    });
     if (!ctx.shader_reloaded(SHADER))
       return;
     reset_pipelines(ctx);
@@ -156,13 +168,19 @@ public:
     ctx.schedule().define(
         LOAD_SYSTEM,
         nxe::sys::SystemFn([this, &ctx](const nxe::sys::Context &c) {
-          if (m_textures.pump(ctx) != 0)
-            (void)m_system.refresh_textures(ctx.scene().registry());
+          refresh_textures(ctx, ctx.scene().registry());
           const usize loaded =
               m_system.load_pending(ctx.scene().registry(), c.dt);
           release_unused_textures(ctx, loaded != 0);
         }));
     ctx.schedule().add(nxe::sys::Stage::Update, LOAD_SYSTEM);
+    // Other scenes load and pose alone; the lip sync is the game's.
+    ctx.add_scene_update(nxe::SceneUpdateFn(
+        [this, &ctx](nxe::scene::Scene &scene, const f32 dt) {
+          refresh_textures(ctx, scene.registry());
+          (void)m_system.load_pending(scene.registry(), dt);
+          (void)m_system.update(scene.registry(), scene.assets(), dt);
+        }));
 
     ctx.schedule().define(
         UPDATE_SYSTEM,
@@ -414,8 +432,10 @@ private:
   /// or gone: a companion switched out must not keep its pages resident.
   void release_unused_textures(nxe::ModuleContext &ctx, const bool loaded) {
     m_in_use.clear();
-    const usize models =
-        m_system.textures_in_use(ctx.scene().registry(), m_in_use);
+    usize models = 0;
+    ctx.for_each_scene([&](nxe::scene::Scene &scene) {
+      models += m_system.textures_in_use(scene.registry(), m_in_use);
+    });
     if (!loaded && models == m_swept_models)
       return;
     m_swept_models = models;
@@ -433,6 +453,34 @@ private:
   nxe::AsyncTextureSet m_textures;
   nx::vector<nx::string_view> m_in_use;
   usize m_swept_models = 0;
+
+  /// Points @p registry's models at the textures that arrived since it last
+  /// looked, whichever scene's update saw them arrive.
+  void refresh_textures(nxe::ModuleContext &ctx,
+                        nxe::scene::registry_t &registry) {
+    if (m_textures.pump(ctx) != 0)
+      ++m_texture_arrivals;
+    Refreshed *seen = nullptr;
+    for (Refreshed &held : m_refreshed)
+      if (held.registry == &registry)
+        seen = &held;
+    if (seen == nullptr) {
+      m_refreshed.push_back({&registry, 0});
+      seen = &m_refreshed.back();
+    }
+    if (seen->arrivals == m_texture_arrivals)
+      return;
+    seen->arrivals = m_texture_arrivals;
+    (void)m_system.refresh_textures(registry);
+  }
+
+  struct Refreshed {
+    const nxe::scene::registry_t *registry = nullptr;
+    u64 arrivals = 0;
+  };
+  /// Counts the pumps that brought textures.
+  u64 m_texture_arrivals = 0;
+  nx::vector<Refreshed> m_refreshed;
   nxe::PipelineLoadRequest m_mask_request;
   /// By blend, for each format a model has drawn into.
   nxe::FormatPipelines
