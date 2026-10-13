@@ -51,6 +51,21 @@ struct Harness {
 
 }
 
+TEST_CASE("live2d: a scene made after the module knows its components and "
+          "reads them from a scene file") {
+  Harness h;
+  if (!h.ready)
+    SKIP("no usable RHI device");
+  const scene::SceneId id = h.engine->create_scene();
+  REQUIRE(id.valid());
+  scene::Scene &made = *h.engine->scene(id);
+  CHECK(made.registry().component_metadata_named("Live2DModel") != nullptr);
+  bool readable = false;
+  for (const scene::ComponentIO &io : made.formats().entries())
+    readable = readable || io.node_key == "live2d";
+  CHECK(readable);
+}
+
 TEST_CASE("live2d: the module is in the build's registry") {
   bool found = false;
   for (const ModuleFactory factory : enabled_module_factories()) {

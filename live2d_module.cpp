@@ -109,9 +109,7 @@ public:
       uninstall_platform();
       return false;
     }
-    Live2DSystem::register_components(ctx.scene().registry());
-    ctx.scene().formats().add(
-        nxe::scene::described<Live2DModel>("live2d", "live2d_models"));
+    on_scene_created(ctx, ctx.scene());
 #if NX_WITH_EDITOR
     ctx.add_picker(
         {.at = nxe::editor::Picker2D::At(
@@ -136,6 +134,13 @@ public:
   void on_expose_scripts(nxe::script::Host &host,
                          nxe::ModuleContext &ctx) override {
     expose_live2d_services(host, ctx);
+  }
+
+  void on_scene_created(nxe::ModuleContext &,
+                        nxe::scene::Scene &scene) override {
+    Live2DSystem::register_components(scene.registry());
+    scene.formats().add(
+        nxe::scene::described<Live2DModel>("live2d", "live2d_models"));
   }
 
   void on_hot_reload(nxe::ModuleContext &ctx) override {
